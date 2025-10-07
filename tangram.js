@@ -175,6 +175,7 @@ const drag = { active:false, id:null, last:[0,0] };
 
 canvas.addEventListener('pointerdown', (e)=>{
   if(state.step!=='play') return;
+  e.preventDefault(); 
   canvas.setPointerCapture(e.pointerId);
   const rect = canvas.getBoundingClientRect();
   const x = (e.clientX - rect.left) * (WORLD_W / rect.width);
@@ -189,6 +190,7 @@ canvas.addEventListener('pointerdown', (e)=>{
 
 canvas.addEventListener('pointermove', (e)=>{
   if(!drag.active) return;
+  e.preventDefault(); 
   const rect = canvas.getBoundingClientRect();
   const x = (e.clientX - rect.left) * (WORLD_W / rect.width);
   const y = (e.clientY - rect.top)  * (WORLD_H / rect.height);
@@ -199,7 +201,9 @@ canvas.addEventListener('pointermove', (e)=>{
 });
 
 canvas.addEventListener('pointerup', ()=>{
-  if(!drag.active) return; const id=drag.id; drag.active=false; drag.id=null; drag.last=[0,0];
+  if(!drag.active) return;
+  e.preventDefault();
+  const id=drag.id; drag.active=false; drag.id=null; drag.last=[0,0];
   // スナップ
   const me = state.pieces.find(p=>p.id===id);
   const myPts = transform(me.shape, me.offset, me.angle, me.flipped);
