@@ -113,6 +113,10 @@ function resetPieces(){
 
 // ===== Canvas & Offscreen =====
 const canvas = document.getElementById('game');
+if (!canvas) {
+  alert('canvas #game が見つかりません（index.html の id を確認 / scriptにdeferを付与）');
+  throw new Error('Canvas not found');
+}
 const ctx = canvas.getContext('2d');
 const offTarget = document.createElement('canvas'); offTarget.width=WORLD_W; offTarget.height=WORLD_H; const ctxT = offTarget.getContext('2d');
 const offUnion  = document.createElement('canvas'); offUnion.width=WORLD_W; offUnion.height=WORLD_H; const ctxU = offUnion.getContext('2d');
