@@ -1,4 +1,23 @@
 <!DOCTYPE html>
+
+<div id="ui">
+  名前：<input id="player" type="text" />
+  <button id="start">開始</button>
+  <button id="judge">判定</button>
+
+  <!-- 追加：課題セレクト & タイトル -->
+  <label>課題：</label>
+  <select id="puzzleSelect"></select>
+  <span> / 現在：<strong id="puzzleTitle">—</strong></span>
+</div>
+
+<!-- キャンバスもIDを tangram.js と合わせる -->
+<canvas id="game" width="1500" height="900"></canvas>
+
+<!-- JSはdeferで読み込む -->
+<script src="./tangram.js" defer></script>
+
+
 <html lang="ja">
 <head>
   <meta charset="UTF-8">
