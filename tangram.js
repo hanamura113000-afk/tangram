@@ -1,3 +1,7 @@
+// ① ファイルの先頭に追加
+document.addEventListener('DOMContentLoaded', () => {
+  // ← ここから下は 既存の tangram.js 本文
+
 // Tangram A (HTML5 Canvas, Mobile Friendly, Spreadsheet Logging)
 // ===== 設定（必ず自分の値に変更） =====
 const ENDPOINT_URL = 'PUT_APPS_SCRIPT_WEB_APP_URL_HERE'; // 例: https://script.google.com/macros/s/XXXX/exec
@@ -328,3 +332,6 @@ sendBtn.addEventListener('click', sendResults);
 resetPieces();
 puzzleTitle.textContent = PUZZLES[state.puzzleIndex].title;
 updateTimer();
+
+                          // ② ファイルの末尾に追加
+}); // ← ここで DOMContentLoaded を閉じる
