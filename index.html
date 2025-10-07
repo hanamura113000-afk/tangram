@@ -1,14 +1,28 @@
 <!DOCTYPE html>
 <html lang="ja">
-
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Github Pages公開練習</title>
+  <meta charset="UTF-8">
+  <title>Tangram A Web</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; }
+    body { display: flex; flex-direction: column; font-family: sans-serif; }
+    #ui { padding: 10px; background: #f5f5f5; }
+    #canvas { flex: 1; background: #fff; display: block; margin: auto; }
+    button { margin-right: 8px; }
+  </style>
 </head>
-
 <body>
-    <h1>こんにちは</h1>
-</body>
 
+  <div id="ui">
+    名前：<input id="playerName" type="text">
+    <button id="startBtn">開始</button>
+    <button id="judgeBtn">判定</button>
+  </div>
+
+  <canvas id="canvas" width="1500" height="900"></canvas>
+
+  <script src="./tangram.js"></script>
+</body>
 </html>
+
