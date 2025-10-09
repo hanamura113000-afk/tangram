@@ -1,14 +1,10 @@
-// Tangram – Pattern A(通常5 + フラッシュ5) 完全版
-// - DPRなし / 座標正規化 / ドラッグ安定（pointer + preventDefault）
-// - 判定：整数化 + 3pxバッファ（AA耐性）
-// - スマホ縦：回転/反転ボタン、キャンバス拡大
-// - パターンA：TangramA_1の5問 + TangramB_2の5問（後半は開始時に正解シルエットを一瞬表示）
+// Tangram – StartScreen + Pattern A(通常5 + フラッシュ5) 完全版
 
 document.addEventListener('DOMContentLoaded', () => {
-  // ====== 送信先（必要なら設定） ======
+  // ===== 設定（必要に応じて） =====
   const ENDPOINT_URL = 'PUT_APPS_SCRIPT_WEB_APP_URL_HERE';
   const POST_TOKEN   = 'PUT_RANDOM_TOKEN_HERE';
-  const APP_VERSION  = 'tangramAB-1.1.0';
+  const APP_VERSION  = 'tangramAB-1.2.0';
 
   const WORLD_W=1500, WORLD_H=900, SNAP_DISTANCE=25;
 
@@ -20,8 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     { title: "コマ",   target: [[482,394],[588,288],[641,288],[641,182],[747,182],[747,288],[800,288],[906,394],[694,606]] },
     { title: "サカナ", target: [[332,356],[544,356],[619,281],[469,281],[544,206],[694,206],[844,356],[694,506],[694,612],[588,612],[694,506],[619,431],[544,506],[394,506],[438,462]] },
   ];
-
-  // ---- Tangram B_2（追加5問）----
+  // ---- Tangram B_2（後半5問）----
   const PUZZLES_B2 = [
     { title: "狐",     target: [[270,288],[376,394],[482,394],[694,394],[800,394],[800,288],[906,394],[981,319],[981,469],[906,544],[831,469],[694,606],[694,544],[544,544],[482,606],[482,394],[376,288]] },
     { title: "猫",     target: [[244,288],[350,288],[456,394],[456,244],[756,244],[831,319],[831,169],[906,244],[981,169],[981,319],[906,394],[606,394],[456,394],[350,394]] },
@@ -30,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
     { title: "魚B",    target: [[482,288],[694,288],[588,182],[694,182],[906,394],[696,606],[588,606],[694,500],[482,500],[588,394]] },
   ];
 
-  // ---- Pieces ----
+  // ---- Tangram Pieces ----
   const TANGRAM_PIECES = [
     [[0,0],[300,0],[150,150]],
     [[0,0],[0,300],[150,150]],
@@ -70,22 +65,46 @@ document.addEventListener('DOMContentLoaded', () => {
   let FLASH_FLAGS    = new Array(PUZZLES_A.length).fill(false);
   const FLASH_MS     = 700;
 
-  function configurePatternA(){
-    ACTIVE_PUZZLES = PUZZLES_A.concat(PUZZLES_B2); // 10面
-    FLASH_FLAGS = [
-      ...new Array(PUZZLES_A.length).fill(false), // 前半：フラッシュなし
-      ...new Array(PUZZLES_B2.length).fill(true)  // 後半：フラッシュあり
-    ];
-    // puzzleSelect はアクティブ問題に合わせて作り直す（デバッグ用途）
-    if (puzzleSelect) {
-      puzzleSelect.innerHTML = '';
-      ACTIVE_PUZZLES.forEach((p,i)=>{
-        const o=document.createElement('option');
-        o.value=i; o.textContent=`${i+1}. ${p.title}`;
-        puzzleSelect.appendChild(o);
-      });
-    }
-  }
+  // ---- UI Elements（開始画面 & ゲームUI）----
+  const startScreen   = $id('startScreen');
+  const playerEntry   = $id('playerEntry');
+  const patternAEntry = $id('patternAEntry');
+  const startGo       = $id('startGo');
+
+  const uiToolbar     = $id('ui');
+  const stageWrap     = $id('stageWrap');
+  const mobileCtrls   = $id('mobileControls');
+
+  const playerInput   = $id('player');
+  const patternA      = $id('patternA');
+  const patternB      = $id('patternB');
+  const puzzleSelect  = $id('puzzleSelect'); // 1回だけ定義（重複定義しない）
+  const puzzleTitle   = $id('puzzleTitle');
+  const timerEl       = $id('timer');
+
+  // ===== 初期表示：開始画面のみ見せる =====
+  uiToolbar.classList.add('hidden');
+  stageWrap.classList.add('hidden');
+  mobileCtrls.classList.add('hidden');
+
+  // 名前が入ったら「開始」活性化
+  playerEntry.addEventListener('input', () => {
+    startGo.disabled = !playerEntry.value.trim();
+  });
+
+  // 開始画面の開始ボタン
+  startGo.addEventListener('click', () => {
+    // 値をツールバーへコピー
+    playerInput.value = playerEntry.value.trim();
+    if (patternAEntry.checked) patternA.checked = true;
+    // 画面切り替え
+    startScreen.classList.add('hidden');
+    uiToolbar.classList.remove('hidden');
+    stageWrap.classList.remove('hidden');
+    mobileCtrls.classList.remove('hidden');
+    // 実ゲーム開始
+    startSeries();
+  });
 
   // ---- Pieces reset ----
   function resetPieces(){
@@ -116,19 +135,15 @@ document.addEventListener('DOMContentLoaded', () => {
   // ---- Render Loop ----
   function render(){
     ctx.clearRect(0,0,WORLD_W,WORLD_H);
-
-    // ターゲット
     const tgt = ACTIVE_PUZZLES[state.puzzleIndex].target;
     drawPolygon(ctx, tgt, '#2b2b2b', '#444', 2);
 
-    // フラッシュ表示（正解シルエットを一瞬重ねる）
     if (state.flashUntil && Date.now() < state.flashUntil) {
       ctx.save();
       drawPolygon(ctx, tgt, 'rgba(255,255,255,0.25)', '#ff4444', 6);
       ctx.restore();
     }
 
-    // ピース
     const ts=state.pieces.map(p=>({...p,world:transform(p.shape,p.offset,p.angle,p.flipped)}));
     ts.forEach(p=>{ ctx.save(); ctx.shadowColor='rgba(0,0,0,.22)'; ctx.shadowBlur=8; ctx.shadowOffsetY=4; drawPolygon(ctx,p.world,p.color,'#1a1a1a',2); ctx.restore(); });
     if(state.selectedId!=null){ const p=ts.find(pp=>pp.id===state.selectedId); if(p){ ctx.save(); ctx.setLineDash([6,4]); drawPolygon(ctx,p.world,null,'#e5e7eb',2); ctx.restore(); } }
@@ -170,18 +185,20 @@ document.addEventListener('DOMContentLoaded', () => {
   },{passive:false});
   canvas.addEventListener('pointercancel',()=>{ drag.active=false; drag.id=null; drag.last=[0,0]; },{passive:false});
 
-  // ---- Rotate / Flip ----
+  // ---- 回転 / 反転 ----
   function rotateSelected(){ if(state.selectedId==null) return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,angle:(p.angle+45)%360}:p); }
   function flipSelected(){ if(state.selectedId==null) return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,flipped:!p.flipped}:p); }
   window.addEventListener('keydown',(e)=>{ if(state.step!=='play'||state.selectedId==null) return; if(e.key==='r'||e.key==='R') rotateSelected(); if(e.key==='f'||e.key==='F') flipSelected(); });
 
-  // ---- Judge（AA耐性：整数化 + 3px拡張）----
+  // ---- 判定（整数化 + 3px拡張）----
+  const offCalc = {ctxT, ctxU, ctxUd, ctxX: tmp.getContext('2d',{willReadFrequently:true})}; // 余分な再取得回避
   function drawDilated(ctx, pts, dilatePx){
     drawPath(ctx, pts); ctx.fillStyle='#000'; ctx.fill();
     if(dilatePx>0){ ctx.lineWidth=dilatePx*2; ctx.lineJoin='miter'; ctx.miterLimit=8; ctx.strokeStyle='#000'; ctx.stroke(); }
   }
   function judge(){
-    const tol=3; // pxバッファ
+    const {ctxT,ctxU,ctxUd,ctxX} = offCalc;
+    const tol=3;
     const tgt = roundPts(ACTIVE_PUZZLES[state.puzzleIndex].target);
     const polys = state.pieces.map(p=> roundPts(transform(p.shape,p.offset,p.angle,p.flipped)));
 
@@ -190,9 +207,9 @@ document.addEventListener('DOMContentLoaded', () => {
     ctxUd.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
 
-    drawDilated(ctxT, tgt, tol);                 // T_expanded
-    polys.forEach(poly => drawDilated(ctxU,  poly, 0));   // U
-    polys.forEach(poly => drawDilated(ctxUd, poly, tol)); // U_expanded
+    drawDilated(ctxT, tgt, tol);
+    polys.forEach(poly => drawDilated(ctxU,  poly, 0));
+    polys.forEach(poly => drawDilated(ctxUd, poly, tol));
 
     // outside = U - T_expanded
     ctxX.drawImage(offU,0,0);
@@ -221,26 +238,40 @@ document.addEventListener('DOMContentLoaded', () => {
     return {ok:true};
   }
 
-  // ---- Timer ----
-  const timerEl=$id('timer'); let startAt=0;
+  // ---- タイマー ----
+  let startAt=0;
   function updateTimer(){ if(timerEl) timerEl.textContent=fmtTime(state.elapsed); }
   function stopTimer(){ if(state.timerId){ clearInterval(state.timerId); state.timerId=null; } }
   function resetTimer(){ stopTimer(); state.elapsed=0; updateTimer(); }
   function startTimer(){ stopTimer(); startAt=Date.now(); state.timerId=setInterval(()=>{ state.elapsed=Math.floor((Date.now()-startAt)/1000); updateTimer(); },500); }
 
-  // ---- UI ----
-  const playerInput=$id('player'), puzzleSelect=$id('puzzleSelect'), puzzleTitle=$id('puzzleTitle');
-  function setPuzzleTitle(){ if(puzzleTitle) puzzleTitle.textContent=ACTIVE_PUZZLES[state.puzzleIndex].title; }
-
+  // ---- ツールバーのボタン紐付け ----
   const bind=(id,ev,fn)=>{ const el=$id(id); if(el) el.addEventListener(ev,fn,{passive:false}); };
   bind('start','click', startSeries);
   bind('judge','click', onJudge);
-  bind('rotate','click', rotateSelected);
-  bind('flip','click',   flipSelected);
   bind('rotateMobile','click', rotateSelected);
-  bind('flipMobile',  'click',  flipSelected);
+  bind('flipMobile','click',  flipSelected);
 
-  // パズル開始時に“答え”を一瞬表示
+  // ---- パターン設定（Aのみ）----
+  function configurePatternA(){
+    ACTIVE_PUZZLES = PUZZLES_A.concat(PUZZLES_B2);
+    FLASH_FLAGS = [
+      ...new Array(PUZZLES_A.length).fill(false),
+      ...new Array(PUZZLES_B2.length).fill(true)
+    ];
+    if (puzzleSelect) {
+      puzzleSelect.innerHTML='';
+      ACTIVE_PUZZLES.forEach((p,i)=>{
+        const o=document.createElement('option');
+        o.value=i; o.textContent=`${i+1}. ${p.title}`;
+        puzzleSelect.appendChild(o);
+      });
+    }
+  }
+
+  function setPuzzleTitle(){ if(puzzleTitle) puzzleTitle.textContent=ACTIVE_PUZZLES[state.puzzleIndex].title; }
+
+  // フラッシュ（答えシルエットを一瞬表示）
   function flashIfNeeded(){
     if (!FLASH_FLAGS[state.puzzleIndex]) return;
     const until = Date.now() + FLASH_MS;
@@ -248,12 +279,10 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(()=>{ if(state.flashUntil===until) state.flashUntil=0; }, FLASH_MS + 30);
   }
 
+  // ---- 開始処理 ----
   function startSeries(){
     if(!playerInput || !playerInput.value.trim()){ alert('名前を入力してください'); return; }
-
-    // パターン選択（Aのみ実装）
-    const patA = document.getElementById('patternA');
-    state.pattern = (patA && patA.checked) ? 'A' : 'A';
+    state.pattern = (patternA && patternA.checked) ? 'A' : 'A'; // Bは将来
     configurePatternA();
 
     state.step='play';
@@ -264,11 +293,10 @@ document.addEventListener('DOMContentLoaded', () => {
     flashIfNeeded();
   }
 
+  // ---- 判定ボタン ----
   function onJudge(){
     const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
     stopTimer();
-
-    // 記録：必要に応じて sendResults() でスプシへ（今はローカルのみ）
     state.results.push({
       puzzleIndex: state.puzzleIndex + 1,
       flashed: !!FLASH_FLAGS[state.puzzleIndex],
@@ -288,15 +316,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ---- init ----
-  // Aを標準で構成してUIを整える（開始前にセレクトへ反映）
-  const puzzleSelect = $id('puzzleSelect'); // 再取得しておく
+  // ---- 初期セットアップ（リストだけ作っておく）----
   configurePatternA();
   setPuzzleTitle();
   resetPieces();
   updateTimer();
 
-  // ショートカット表記（PC向け）
+  // PC向けショートカット表記
   (function addShortcutHint(){
     const host=$id('ui')||document.body;
     const hint=document.createElement('div');
