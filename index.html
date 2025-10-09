@@ -1,45 +1,64 @@
-<!DOCTYPE html>
-
-<div id="ui">
-  名前：<input id="player" type="text" />
-  <button id="start">開始</button>
-  <button id="judge">判定</button>
-
-  <!-- 追加：課題セレクト & タイトル -->
-  <label>課題：</label>
-  <select id="puzzleSelect"></select>
-  <span> / 現在：<strong id="puzzleTitle">—</strong></span>
-
-   <div id="timer">00:00</div>
-</div>
-
-<!-- キャンバスもIDを tangram.js と合わせる -->
-<canvas id="game" width="1500" height="900"></canvas>
-
-<!-- JSはdeferで読み込む -->
-<script src="./tangram.js" defer></script>
-
-
+<!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="UTF-8">
-  <title>Tangram A Web</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+  <title>Tangram A</title>
   <style>
-    html, body { margin: 0; padding: 0; height: 100%; }
-    body { display: flex; flex-direction: column; font-family: sans-serif; }
-    #ui { padding: 10px; background: #f5f5f5; }
-    #canvas { flex: 1; background: #fff; display: block; margin: auto; }
-    button { margin-right: 8px; }
-    canvas { touch-action: none; }   /* スクロール・ズームを無効化してドラッグ優先 */
-    html, body { overscroll-behavior: none; }
+    :root { --bg:#f3f4f6; --panel:#f1f5f9; --text:#111827; --muted:#6b7280; }
+    *{box-sizing:border-box}
+    html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+    body{overscroll-behavior:none}
 
+    /* 上部UI */
+    #ui{position:sticky;top:0;z-index:10;background:var(--panel);padding:8px 10px;border-bottom:1px solid #e5e7eb;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+    #ui input, #ui select, #ui button{padding:6px 8px;border:1px solid #cbd5e1;border-radius:8px;background:#fff}
+    #timer{font-weight:700;margin-left:4px}
+
+    /* キャンバス */
+    .stage{padding:10px}
+    canvas{display:block;width:100%;height:auto;max-height:75vh;background:#ffffff;border-radius:14px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
+    canvas{touch-action:none}
+
+    /* モバイル縦だけに表示する操作パッド */
+    .mobile-controls{
+      position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
+      display:none; gap:12px; z-index:50;
+      padding:8px 12px; border-radius:14px; background:rgba(0,0,0,.35); backdrop-filter:blur(8px)
+    }
+    .mobile-controls button{
+      font-size:16px; font-weight:700; padding:12px 16px; border-radius:12px;
+      border:1px solid rgba(255,255,255,.25); color:#fff; background:#0b1220; touch-action:manipulation
+    }
+    .mobile-controls button:active{ transform:translateY(1px) }
+
+    /* 縦向き & タッチ端末のみ表示（横向き/PCは非表示） */
+    @media (orientation:portrait) and (pointer:coarse){
+      .mobile-controls{ display:flex; padding-bottom:max(12px, env(safe-area-inset-bottom)) }
+    }
   </style>
 </head>
 <body>
+  <div id="ui">
+    名前：<input id="player" type="text" />
+    <button id="start">開始</button>
+    <button id="judge">判定</button>
+    <label>課題：</label>
+    <select id="puzzleSelect"></select>
+    <span> / 現在：<strong id="puzzleTitle">—</strong></span>
+    <div id="timer">00:00</div>
+  </div>
 
+  <div class="stage">
+    <canvas id="game" width="1500" height="900"></canvas>
+  </div>
 
+  <!-- スマホ縦だけに出る回転/反転ボタン -->
+  <div class="mobile-controls" aria-label="モバイル操作">
+    <button id="rotateMobile" type="button">回転 (R)</button>
+    <button id="flipMobile"  type="button">反転 (F)</button>
+  </div>
 
+  <script src="./tangram.js" defer></script>
 </body>
 </html>
-
