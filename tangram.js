@@ -1,8 +1,10 @@
-// Tangram A (HTML5 Canvas) – robust version
-// - DOMContentLoaded 待ち
+// Tangram A (HTML5 Canvas) – final robust version
+// - DPRスケール無し（座標ズレ解消）
+// - canvasXYで座標正規化
+// - pointerイベントはpreventDefault + passive:false
 // - UI要素が無くても落ちない(null安全)
-// - pointer イベントで preventDefault 追加（モバイルで掴める）
-// - タイマー要素(#timer)が無くても動作
+// - #timerが無くても動作
+// - getContext(..., {willReadFrequently:true})
 
 document.addEventListener('DOMContentLoaded', () => {
   // ====== 送信先（必要なら設定） ======
@@ -83,17 +85,17 @@ document.addEventListener('DOMContentLoaded', () => {
   const canvas = $id('game');
   if (!canvas) { alert('canvas#game が見つかりません。index.html を確認してください。'); return; }
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  canvas.style.touchAction = 'none'; // モバイルでスクロールよりドラッグ優先
 
   // オフスクリーン
   const offT = document.createElement('canvas'); offT.width = WORLD_W; offT.height = WORLD_H; const ctxT = offT.getContext('2d');
   const offU = document.createElement('canvas'); offU.width = WORLD_W; offU.height = WORLD_H; const ctxU = offU.getContext('2d');
   const tmp  = document.createElement('canvas'); tmp.width  = WORLD_W; tmp.height  = WORLD_H; const ctxX = tmp.getContext('2d');
 
+  // DPRスケール無し（論理解像度=描画解像度）
   function resizeCanvas(){
-    const dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
-    canvas.width = WORLD_W * dpr;
-    canvas.height = WORLD_H * dpr;
-    ctx.setTransform(dpr,0,0,dpr,0,0);
+    canvas.width  = WORLD_W;
+    canvas.height = WORLD_H;
   }
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
@@ -137,10 +139,13 @@ document.addEventListener('DOMContentLoaded', () => {
   // ====== Pointer（ドラッグ） ======
   const drag = { active:false, id:null, last:[0,0] };
 
+  // CSSピクセル → キャンバス座標へ正規化
   function canvasXY(e){
-    const r = canvas.getBoundingClientRect();
-    const x = (e.clientX - r.left) * (WORLD_W / r.width);
-    const y = (e.clientY - r.top)  * (WORLD_H / r.height);
+    const r  = canvas.getBoundingClientRect();
+    const sx = canvas.width  / r.width;
+    const sy = canvas.height / r.height;
+    const x = (e.clientX - r.left) * sx;
+    const y = (e.clientY - r.top)  * sy;
     return [x,y];
   }
 
@@ -192,7 +197,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if(best){ me.offset=[me.offset[0]+best[0], me.offset[1]+best[1]]; }
   }, { passive:false });
 
-  // ====== 回転・反転 ======
+  canvas.addEventListener('pointercancel', () => {
+    drag.active=false; drag.id=null; drag.last=[0,0];
+  }, { passive:false });
+
+  // ====== 回転・反転（キーボード対応も可） ======
   function rotateSelected(){
     if(state.selectedId==null) return;
     state.pieces = state.pieces.map(p => p.id===state.selectedId ? {...p, angle:(p.angle+45)%360} : p);
@@ -201,6 +210,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if(state.selectedId==null) return;
     state.pieces = state.pieces.map(p => p.id===state.selectedId ? {...p, flipped:!p.flipped} : p);
   }
+  window.addEventListener('keydown', (e)=>{
+    if(state.step!=='play' || state.selectedId==null) return;
+    if(e.key==='r' || e.key==='R') rotateSelected();
+    if(e.key==='f' || e.key==='F') flipSelected();
+  });
 
   // ====== 判定 ======
   function judge(){
@@ -269,7 +283,6 @@ document.addEventListener('DOMContentLoaded', () => {
   function setPuzzleTitle(){ if(puzzleTitle) puzzleTitle.textContent = PUZZLES[state.puzzleIndex].title; }
 
   if (puzzleSelect) {
-    // options
     puzzleSelect.innerHTML = '';
     PUZZLES.forEach((p,i)=>{
       const opt = document.createElement('option');
@@ -281,7 +294,7 @@ document.addEventListener('DOMContentLoaded', () => {
       setPuzzleTitle(); resetPieces(); resetTimer();
     });
   } else {
-    state.puzzleIndex = 0; // フォールバック
+    state.puzzleIndex = 0;
   }
 
   const bind = (id, ev, fn) => { const el=$id(id); if(el) el.addEventListener(ev, fn, { passive:false }); };
