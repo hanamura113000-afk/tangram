@@ -1,17 +1,36 @@
-// Tangram A – robust + tolerant judge + mobile controls + mobile zoom
-// - DPRなし（座標ズレ無し）/ canvasXYで座標正規化
-// - 判定は整数化 + 3pxバッファ（外側/内側に膨らませて比較）でAAに強い
-// - スマホ縦だけに回転/反転ボタン（#rotateMobile / #flipMobile）
-// - UIが欠けていても落ちない(null安全)
+// Tangram – Pattern A(通常5 + フラッシュ5) 完全版
+// - DPRなし / 座標正規化 / ドラッグ安定（pointer + preventDefault）
+// - 判定：整数化 + 3pxバッファ（AA耐性）
+// - スマホ縦：回転/反転ボタン、キャンバス拡大
+// - パターンA：TangramA_1の5問 + TangramB_2の5問（後半は開始時に正解シルエットを一瞬表示）
 
 document.addEventListener('DOMContentLoaded', () => {
+  // ====== 送信先（必要なら設定） ======
   const ENDPOINT_URL = 'PUT_APPS_SCRIPT_WEB_APP_URL_HERE';
   const POST_TOKEN   = 'PUT_RANDOM_TOKEN_HERE';
-  const APP_VERSION  = 'tangramA-html5-1.0.3';
+  const APP_VERSION  = 'tangramAB-1.1.0';
 
   const WORLD_W=1500, WORLD_H=900, SNAP_DISTANCE=25;
 
-  // ---- Pieces & Puzzles ----
+  // ---- Tangram A_1（既存5問）----
+  const PUZZLES_A = [
+    { title: "アヒル", target: [[482,394],[588,288],[800,288],[800,182],[906,182],[1012,182],[906,288],[906,394],[800,500],[588,500]] },
+    { title: "凹み",   target: [[482,182],[588,182],[588,394],[800,394],[800,182],[906,182],[906,500],[482,500]] },
+    { title: "家",     target: [[694,76],[906,288],[800,288],[800,500],[588,500],[588,288],[482,288]] },
+    { title: "コマ",   target: [[482,394],[588,288],[641,288],[641,182],[747,182],[747,288],[800,288],[906,394],[694,606]] },
+    { title: "サカナ", target: [[332,356],[544,356],[619,281],[469,281],[544,206],[694,206],[844,356],[694,506],[694,612],[588,612],[694,506],[619,431],[544,506],[394,506],[438,462]] },
+  ];
+
+  // ---- Tangram B_2（追加5問）----
+  const PUZZLES_B2 = [
+    { title: "狐",     target: [[270,288],[376,394],[482,394],[694,394],[800,394],[800,288],[906,394],[981,319],[981,469],[906,544],[831,469],[694,606],[694,544],[544,544],[482,606],[482,394],[376,288]] },
+    { title: "猫",     target: [[244,288],[350,288],[456,394],[456,244],[756,244],[831,319],[831,169],[906,244],[981,169],[981,319],[906,394],[606,394],[456,394],[350,394]] },
+    { title: "ライオン", target: [[482,288],[588,182],[694,288],[694,394],[906,394],[1012,288],[1012,394],[1056,394],[1131,469],[981,469],[1056,544],[756,544],[694,606],[694,500],[588,394],[588,288]] },
+    { title: "ネッシー", target: [[257,425],[363,319],[469,319],[681,319],[756,244],[831,319],[906,244],[981,319],[906,394],[1012,394],[1012,500],[906,500],[906,544],[756,394],[606,394],[469,531],[469,319],[363,425]] },
+    { title: "魚B",    target: [[482,288],[694,288],[588,182],[694,182],[906,394],[696,606],[588,606],[694,500],[482,500],[588,394]] },
+  ];
+
+  // ---- Pieces ----
   const TANGRAM_PIECES = [
     [[0,0],[300,0],[150,150]],
     [[0,0],[0,300],[150,150]],
@@ -22,13 +41,6 @@ document.addEventListener('DOMContentLoaded', () => {
     [[0,0],[150,0],[225,75],[75,75]],
   ];
   const COLORS=["#FF6B6B","#FFD93D","#6BCB77","#4D96FF","#9B59B6","#F39C12","#1ABC9C"];
-  const PUZZLES=[
-    {title:"アヒル",target:[[482,394],[588,288],[800,288],[800,182],[906,182],[1012,182],[906,288],[906,394],[800,500],[588,500]]},
-    {title:"凹み",  target:[[482,182],[588,182],[588,394],[800,394],[800,182],[906,182],[906,500],[482,500]]},
-    {title:"家",    target:[[694,76],[906,288],[800,288],[800,500],[588,500],[588,288],[482,288]]},
-    {title:"コマ",  target:[[482,394],[588,288],[641,288],[641,182],[747,182],[747,288],[800,288],[906,394],[694,606]]},
-    {title:"サカナ",target:[[332,356],[544,356],[619,281],[469,281],[544,206],[694,206],[844,356],[694,506],[694,612],[588,612],[694,506],[619,431],[544,506],[394,506],[438,462]]},
-  ];
 
   // ---- Utils ----
   const $id = id => document.getElementById(id);
@@ -46,8 +58,36 @@ document.addEventListener('DOMContentLoaded', () => {
   function alphaCount(ctx,w,h){ const d=ctx.getImageData(0,0,w,h).data; let c=0; for(let i=3;i<d.length;i+=4){ if(d[i]!==0) c++; } return c; }
 
   // ---- State ----
-  const state={ pieces:[], selectedId:null, puzzleIndex:0, step:'home', results:[], elapsed:0, timerId:null };
+  const state={
+    pieces:[], selectedId:null, puzzleIndex:0, step:'home',
+    results:[], elapsed:0, timerId:null,
+    pattern:'A',
+    flashUntil:0
+  };
 
+  // 進行用（今回Aのみ）
+  let ACTIVE_PUZZLES = PUZZLES_A.slice();
+  let FLASH_FLAGS    = new Array(PUZZLES_A.length).fill(false);
+  const FLASH_MS     = 700;
+
+  function configurePatternA(){
+    ACTIVE_PUZZLES = PUZZLES_A.concat(PUZZLES_B2); // 10面
+    FLASH_FLAGS = [
+      ...new Array(PUZZLES_A.length).fill(false), // 前半：フラッシュなし
+      ...new Array(PUZZLES_B2.length).fill(true)  // 後半：フラッシュあり
+    ];
+    // puzzleSelect はアクティブ問題に合わせて作り直す（デバッグ用途）
+    if (puzzleSelect) {
+      puzzleSelect.innerHTML = '';
+      ACTIVE_PUZZLES.forEach((p,i)=>{
+        const o=document.createElement('option');
+        o.value=i; o.textContent=`${i+1}. ${p.title}`;
+        puzzleSelect.appendChild(o);
+      });
+    }
+  }
+
+  // ---- Pieces reset ----
   function resetPieces(){
     state.pieces = TANGRAM_PIECES.map((shape,i)=>({
       id:i, shape:shape.map(([x,y])=>[x,y]),
@@ -63,7 +103,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const ctx=canvas.getContext('2d',{willReadFrequently:true});
   canvas.style.touchAction='none';
 
-  // Offscreens
+  // Offscreens（判定用）
   const offT=document.createElement('canvas'); offT.width=WORLD_W; offT.height=WORLD_H; const ctxT=offT.getContext('2d',{willReadFrequently:true});
   const offU=document.createElement('canvas'); offU.width=WORLD_W; offU.height=WORLD_H; const ctxU=offU.getContext('2d',{willReadFrequently:true});
   const offUd=document.createElement('canvas'); offUd.width=WORLD_W; offUd.height=WORLD_H; const ctxUd=offUd.getContext('2d',{willReadFrequently:true});
@@ -76,7 +116,19 @@ document.addEventListener('DOMContentLoaded', () => {
   // ---- Render Loop ----
   function render(){
     ctx.clearRect(0,0,WORLD_W,WORLD_H);
-    drawPolygon(ctx, PUZZLES[state.puzzleIndex].target, '#2b2b2b', '#444', 2);
+
+    // ターゲット
+    const tgt = ACTIVE_PUZZLES[state.puzzleIndex].target;
+    drawPolygon(ctx, tgt, '#2b2b2b', '#444', 2);
+
+    // フラッシュ表示（正解シルエットを一瞬重ねる）
+    if (state.flashUntil && Date.now() < state.flashUntil) {
+      ctx.save();
+      drawPolygon(ctx, tgt, 'rgba(255,255,255,0.25)', '#ff4444', 6);
+      ctx.restore();
+    }
+
+    // ピース
     const ts=state.pieces.map(p=>({...p,world:transform(p.shape,p.offset,p.angle,p.flipped)}));
     ts.forEach(p=>{ ctx.save(); ctx.shadowColor='rgba(0,0,0,.22)'; ctx.shadowBlur=8; ctx.shadowOffsetY=4; drawPolygon(ctx,p.world,p.color,'#1a1a1a',2); ctx.restore(); });
     if(state.selectedId!=null){ const p=ts.find(pp=>pp.id===state.selectedId); if(p){ ctx.save(); ctx.setLineDash([6,4]); drawPolygon(ctx,p.world,null,'#e5e7eb',2); ctx.restore(); } }
@@ -110,7 +162,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if(!drag.active) return; e.preventDefault();
     const id=drag.id; drag.active=false; drag.id=null; drag.last=[0,0];
     const me=state.pieces.find(p=>p.id===id); const myPts=transform(me.shape,me.offset,me.angle,me.flipped);
-    const targetPts=PUZZLES[state.puzzleIndex].target;
+    const targetPts=ACTIVE_PUZZLES[state.puzzleIndex].target;
     const others=state.pieces.filter(p=>p.id!==id).flatMap(p=>transform(p.shape,p.offset,p.angle,p.flipped));
     const snaps=[...targetPts,...others]; let best=null, bestD2=SNAP_DISTANCE*SNAP_DISTANCE;
     for(const mp of myPts){ for(const tp of snaps){ const d2=distanceSq(mp,tp); if(d2<bestD2){bestD2=d2; best=[tp[0]-mp[0],tp[1]-mp[1]];} } }
@@ -123,20 +175,20 @@ document.addEventListener('DOMContentLoaded', () => {
   function flipSelected(){ if(state.selectedId==null) return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,flipped:!p.flipped}:p); }
   window.addEventListener('keydown',(e)=>{ if(state.step!=='play'||state.selectedId==null) return; if(e.key==='r'||e.key==='R') rotateSelected(); if(e.key==='f'||e.key==='F') flipSelected(); });
 
-  // ---- Judge (tolerant) ----
+  // ---- Judge（AA耐性：整数化 + 3px拡張）----
   function drawDilated(ctx, pts, dilatePx){
     drawPath(ctx, pts); ctx.fillStyle='#000'; ctx.fill();
     if(dilatePx>0){ ctx.lineWidth=dilatePx*2; ctx.lineJoin='miter'; ctx.miterLimit=8; ctx.strokeStyle='#000'; ctx.stroke(); }
   }
   function judge(){
     const tol=3; // pxバッファ
+    const tgt = roundPts(ACTIVE_PUZZLES[state.puzzleIndex].target);
+    const polys = state.pieces.map(p=> roundPts(transform(p.shape,p.offset,p.angle,p.flipped)));
+
     ctxT.clearRect(0,0,WORLD_W,WORLD_H);
     ctxU.clearRect(0,0,WORLD_W,WORLD_H);
     ctxUd.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
-
-    const tgt = roundPts(PUZZLES[state.puzzleIndex].target);
-    const polys = state.pieces.map(p=> roundPts(transform(p.shape,p.offset,p.angle,p.flipped)));
 
     drawDilated(ctxT, tgt, tol);                 // T_expanded
     polys.forEach(poly => drawDilated(ctxU,  poly, 0));   // U
@@ -178,47 +230,73 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ---- UI ----
   const playerInput=$id('player'), puzzleSelect=$id('puzzleSelect'), puzzleTitle=$id('puzzleTitle');
-  function setPuzzleTitle(){ if(puzzleTitle) puzzleTitle.textContent=PUZZLES[state.puzzleIndex].title; }
-  if(puzzleSelect){
-    puzzleSelect.innerHTML=''; PUZZLES.forEach((p,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=`${i+1}. ${p.title}`; puzzleSelect.appendChild(o); });
-    puzzleSelect.addEventListener('change',()=>{ state.puzzleIndex=Number(puzzleSelect.value); setPuzzleTitle(); resetPieces(); resetTimer(); });
-  }else{ state.puzzleIndex=0; }
+  function setPuzzleTitle(){ if(puzzleTitle) puzzleTitle.textContent=ACTIVE_PUZZLES[state.puzzleIndex].title; }
 
   const bind=(id,ev,fn)=>{ const el=$id(id); if(el) el.addEventListener(ev,fn,{passive:false}); };
   bind('start','click', startSeries);
   bind('judge','click', onJudge);
-  bind('rotate','click', rotateSelected);   // （PC用ボタンが無くてもOK）
+  bind('rotate','click', rotateSelected);
   bind('flip','click',   flipSelected);
-  bind('rotateMobile','click', rotateSelected); // スマホ縦ボタン
+  bind('rotateMobile','click', rotateSelected);
   bind('flipMobile',  'click',  flipSelected);
+
+  // パズル開始時に“答え”を一瞬表示
+  function flashIfNeeded(){
+    if (!FLASH_FLAGS[state.puzzleIndex]) return;
+    const until = Date.now() + FLASH_MS;
+    state.flashUntil = until;
+    setTimeout(()=>{ if(state.flashUntil===until) state.flashUntil=0; }, FLASH_MS + 30);
+  }
 
   function startSeries(){
     if(!playerInput || !playerInput.value.trim()){ alert('名前を入力してください'); return; }
-    state.step='play'; state.results=[];
-    if(puzzleSelect) state.puzzleIndex=Number(puzzleSelect.value);
+
+    // パターン選択（Aのみ実装）
+    const patA = document.getElementById('patternA');
+    state.pattern = (patA && patA.checked) ? 'A' : 'A';
+    configurePatternA();
+
+    state.step='play';
+    state.results=[];
+    state.puzzleIndex=0;
+    if (puzzleSelect) puzzleSelect.value='0';
     setPuzzleTitle(); resetPieces(); resetTimer(); startTimer();
+    flashIfNeeded();
   }
+
   function onJudge(){
     const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
-    stopTimer(); state.results.push(state.elapsed);
-    if(state.puzzleIndex<PUZZLES.length-1){
-      alert(`CLEAR!\n課題: ${PUZZLES[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
-      state.puzzleIndex++; if(puzzleSelect) puzzleSelect.value=String(state.puzzleIndex);
+    stopTimer();
+
+    // 記録：必要に応じて sendResults() でスプシへ（今はローカルのみ）
+    state.results.push({
+      puzzleIndex: state.puzzleIndex + 1,
+      flashed: !!FLASH_FLAGS[state.puzzleIndex],
+      timeSec: state.elapsed
+    });
+
+    if(state.puzzleIndex<ACTIVE_PUZZLES.length-1){
+      alert(`CLEAR!\n課題: ${ACTIVE_PUZZLES[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
+      state.puzzleIndex++;
+      if (puzzleSelect) puzzleSelect.value=String(state.puzzleIndex);
       setPuzzleTitle(); resetPieces(); resetTimer(); startTimer();
+      flashIfNeeded();
     }else{
-      alert(`5問クリア！合計: ${state.results.reduce((a,b)=>a+b,0)} 秒`);
+      const total=state.results.reduce((a,b)=>a+b.timeSec,0);
+      alert(`10問クリア！合計: ${total} 秒`);
       state.step='finished';
     }
   }
 
-  // 必要に応じてサーバー送信/CSVを実装してください（今は未使用）
-  // async function sendResults(){ ... }
-  // function exportCSV(){ ... }
-
   // ---- init ----
-  resetPieces(); setPuzzleTitle(); updateTimer();
+  // Aを標準で構成してUIを整える（開始前にセレクトへ反映）
+  const puzzleSelect = $id('puzzleSelect'); // 再取得しておく
+  configurePatternA();
+  setPuzzleTitle();
+  resetPieces();
+  updateTimer();
 
-  // PC向けショートカット表記
+  // ショートカット表記（PC向け）
   (function addShortcutHint(){
     const host=$id('ui')||document.body;
     const hint=document.createElement('div');
