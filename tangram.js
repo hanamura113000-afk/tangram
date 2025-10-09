@@ -1,16 +1,17 @@
-// Tangram A (HTML5 Canvas) – final robust version
-// - DPRスケール無し（座標ズレ解消）
-// - canvasXYで座標正規化
-// - pointerイベントはpreventDefault + passive:false
-// - UI要素が無くても落ちない(null安全)
-// - #timerが無くても動作
-// - getContext(..., {willReadFrequently:true})
+// Tangram A (HTML5 Canvas) – AA耐性付き & ショートカット表記対応
+// - 判定時に頂点を整数へ丸めてAAノイズを低減
+// - 判定トレランス調整（誤検知を防ぐ）
+// - オフスクリーンで imageSmoothingEnabled=false
+// - DPRスケール無し / canvasXYで座標正規化
+// - pointerはpreventDefault + passive:false
+// - UI要素が無くても落ちない（null安全）
+// - #timerが無くてもOK
 
 document.addEventListener('DOMContentLoaded', () => {
   // ====== 送信先（必要なら設定） ======
   const ENDPOINT_URL = 'PUT_APPS_SCRIPT_WEB_APP_URL_HERE';
   const POST_TOKEN   = 'PUT_RANDOM_TOKEN_HERE';
-  const APP_VERSION  = 'tangramA-html5-1.0.0';
+  const APP_VERSION  = 'tangramA-html5-1.0.1';
 
   // ====== 定数 ======
   const WORLD_W = 1500;
@@ -40,6 +41,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const $id = (id) => document.getElementById(id);
   const fmtTime = (s) => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
   const deg2rad = (d) => d * Math.PI / 180;
+  const roundPts = (poly) => poly.map(([x,y]) => [Math.round(x), Math.round(y)]); // ← 追加（AA対策）
   function centroid(pts){ let sx=0, sy=0; for(const [x,y] of pts){ sx+=x; sy+=y; } return [sx/pts.length, sy/pts.length]; }
   function transform(points, offset, angle, flipped){
     const [cx,cy]=centroid(points); const a=deg2rad(angle); const c=Math.cos(a), s=Math.sin(a);
@@ -87,10 +89,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   canvas.style.touchAction = 'none'; // モバイルでスクロールよりドラッグ優先
 
-  // オフスクリーン
-  const offT = document.createElement('canvas'); offT.width = WORLD_W; offT.height = WORLD_H; const ctxT = offT.getContext('2d');
-  const offU = document.createElement('canvas'); offU.width = WORLD_W; offU.height = WORLD_H; const ctxU = offU.getContext('2d');
-  const tmp  = document.createElement('canvas'); tmp.width  = WORLD_W; tmp.height  = WORLD_H; const ctxX = tmp.getContext('2d');
+  // オフスクリーン（判定用）
+  const offT = document.createElement('canvas'); offT.width = WORLD_W; offT.height = WORLD_H; const ctxT = offT.getContext('2d', { willReadFrequently:true });
+  const offU = document.createElement('canvas'); offU.width = WORLD_W; offU.height = WORLD_H; const ctxU = offU.getContext('2d', { willReadFrequently:true });
+  const tmp  = document.createElement('canvas'); tmp.width  = WORLD_W; tmp.height  = WORLD_H; const ctxX = tmp.getContext('2d',  { willReadFrequently:true });
+  // ベクタ塗りには直接効きませんが、画像合成の補間を抑えるために設定
+  ctxT.imageSmoothingEnabled = false;
+  ctxU.imageSmoothingEnabled = false;
+  ctxX.imageSmoothingEnabled = false;
 
   // DPRスケール無し（論理解像度=描画解像度）
   function resizeCanvas(){
@@ -201,7 +207,7 @@ document.addEventListener('DOMContentLoaded', () => {
     drag.active=false; drag.id=null; drag.last=[0,0];
   }, { passive:false });
 
-  // ====== 回転・反転（キーボード対応も可） ======
+  // ====== 回転・反転（キーボード） ======
   function rotateSelected(){
     if(state.selectedId==null) return;
     state.pieces = state.pieces.map(p => p.id===state.selectedId ? {...p, angle:(p.angle+45)%360} : p);
@@ -216,18 +222,19 @@ document.addEventListener('DOMContentLoaded', () => {
     if(e.key==='f' || e.key==='F') flipSelected();
   });
 
-  // ====== 判定 ======
+  // ====== 判定（AA耐性） ======
   function judge(){
     ctxT.clearRect(0,0,WORLD_W,WORLD_H);
     ctxU.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
 
-    // target
+    // target（頂点を整数へ丸める）
+    const tgtRounded = roundPts(PUZZLES[state.puzzleIndex].target);
     ctxT.fillStyle='#000';
-    drawPolygon(ctxT, PUZZLES[state.puzzleIndex].target, '#000', null, 0);
+    drawPolygon(ctxT, tgtRounded, '#000', null, 0);
 
-    // union of pieces
-    const polys = state.pieces.map(p=> transform(p.shape,p.offset,p.angle,p.flipped));
+    // union of pieces（各ピースも整数グリッドへ）
+    const polys = state.pieces.map(p=> roundPts(transform(p.shape,p.offset,p.angle,p.flipped)));
     ctxU.fillStyle='#000';
     polys.forEach(poly => drawPolygon(ctxU, poly, '#000', null, 0));
 
@@ -257,10 +264,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const overlap = Math.max(0, sum - unionArea);
 
-    const AREA_TOL = 1200, OUT_TOL = 300;
-    if (outside > OUT_TOL) return { ok:false, reason:'枠外にはみ出しています' };
-    if (overlap > AREA_TOL) return { ok:false, reason:'ピースが重なっています' };
-    if (gaps    > AREA_TOL) return { ok:false, reason:'隙間があります' };
+    // ★トレランス（AAノイズ吸収のため少し広め）
+    const OUT_TOL  = 1500;  // はみ出し許容
+    const AREA_TOL = 3000;  // 隙間/重なり許容
+
+    if (outside > OUT_TOL) return { ok:false, reason:'枠外に出ています。' };
+    if (overlap > AREA_TOL) return { ok:false, reason:'ピースが重なっています。' };
+    if (gaps    > AREA_TOL) return { ok:false, reason:'隙間があります。' };
     return { ok:true };
   }
 
@@ -356,7 +366,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const headers = ["名前", ...PUZZLES.map(p=>`${p.title}（秒）`), "合計（秒）"];
     const total = state.results.reduce((a,b)=>a+b,0);
     const row = [playerInput ? playerInput.value.trim() : '', ...state.results, total];
-    const csv = [headers.join(','), row.join(',')].join('\n');
+    const csv = [headers.join(','), row.join('\n').replace(/\n/g, ' ')].join('\n'); // シンプルCSV
     const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=shift_jis' });
     const url = URL.createObjectURL(blob);
     const a=document.createElement('a'); a.href=url; a.download='result.csv';
@@ -367,4 +377,13 @@ document.addEventListener('DOMContentLoaded', () => {
   resetPieces();
   setPuzzleTitle();
   updateTimer();
+
+  // ====== 画面にショートカット表記を出す（HTMLに無くても自動追加） ======
+  (function addShortcutHint(){
+    const host = $id('ui') || document.body;
+    const hint = document.createElement('div');
+    hint.textContent = 'ショートカット：回転 R / 反転 F';
+    hint.style.cssText = 'margin:8px 0; font-size:12px; opacity:.8;';
+    host.appendChild(hint);
+  })();
 });
