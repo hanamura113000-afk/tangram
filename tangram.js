@@ -1,4 +1,4 @@
-// Tangram A – robust + tolerant judge + mobile controls
+// Tangram A – robust + tolerant judge + mobile controls + mobile zoom
 // - DPRなし（座標ズレ無し）/ canvasXYで座標正規化
 // - 判定は整数化 + 3pxバッファ（外側/内側に膨らませて比較）でAAに強い
 // - スマホ縦だけに回転/反転ボタン（#rotateMobile / #flipMobile）
@@ -187,11 +187,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const bind=(id,ev,fn)=>{ const el=$id(id); if(el) el.addEventListener(ev,fn,{passive:false}); };
   bind('start','click', startSeries);
   bind('judge','click', onJudge);
-  // （PC用ボタンが無くてもOK：null安全）
-  bind('rotate','click', rotateSelected);
+  bind('rotate','click', rotateSelected);   // （PC用ボタンが無くてもOK）
   bind('flip','click',   flipSelected);
-  // モバイル縦だけに出るボタン
-  bind('rotateMobile','click', rotateSelected);
+  bind('rotateMobile','click', rotateSelected); // スマホ縦ボタン
   bind('flipMobile',  'click',  flipSelected);
 
   function startSeries(){
@@ -213,14 +211,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // （任意）結果送信/CSVは必要に応じて使ってください
-  async function sendResults(){/* 省略可：あなたのGAS URLを入れれば動きます */} // 使わないなら空でもOK
-  function exportCSV(){/* 省略可 */}
+  // 必要に応じてサーバー送信/CSVを実装してください（今は未使用）
+  // async function sendResults(){ ... }
+  // function exportCSV(){ ... }
 
   // ---- init ----
   resetPieces(); setPuzzleTitle(); updateTimer();
 
-  // 画面にショートカット表記を追加（PC向け）
+  // PC向けショートカット表記
   (function addShortcutHint(){
     const host=$id('ui')||document.body;
     const hint=document.createElement('div');
