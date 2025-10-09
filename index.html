@@ -11,14 +11,26 @@
     body{overscroll-behavior:none}
 
     /* 上部UI */
-    #ui{position:sticky;top:0;z-index:10;background:var(--panel);padding:8px 10px;border-bottom:1px solid #e5e7eb;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-    #ui input, #ui select, #ui button{padding:6px 8px;border:1px solid #cbd5e1;border-radius:8px;background:#fff}
+    #ui{
+      position:sticky;top:0;z-index:10;background:var(--panel);
+      padding:8px 10px;border-bottom:1px solid #e5e7eb;
+      display:flex;flex-wrap:wrap;gap:8px;align-items:center
+    }
+    #ui input, #ui select, #ui button, #ui label{
+      padding:6px 8px;border-radius:8px;background:#fff
+    }
+    #ui input, #ui select, #ui button{
+      border:1px solid #cbd5e1;
+    }
     #timer{font-weight:700;margin-left:4px}
 
     /* キャンバス */
     .stage{padding:10px}
-    canvas{display:block;width:100%;height:auto;max-height:75vh;background:#ffffff;border-radius:14px;box-shadow:0 2px 8px rgba(0,0,0,.06)}
-    canvas{touch-action:none}
+    canvas{
+      display:block;width:100%;height:auto;max-height:75vh;
+      background:#ffffff;border-radius:14px;box-shadow:0 2px 8px rgba(0,0,0,.06);
+      touch-action:none
+    }
 
     /* モバイル縦だけに表示する操作パッド */
     .mobile-controls{
@@ -32,20 +44,43 @@
     }
     .mobile-controls button:active{ transform:translateY(1px) }
 
-    /* 縦向き & タッチ端末のみ表示（横向き/PCは非表示） */
+    /* ===== スマホ縦だけ：ゲームを大きく表示 ===== */
     @media (orientation:portrait) and (pointer:coarse){
-      .mobile-controls{ display:flex; padding-bottom:max(12px, env(safe-area-inset-bottom)) }
+      #ui{ padding:6px 8px; gap:6px; }
+      .stage{ padding:4px 0; }
+      canvas{
+        width:100vw;
+        max-height:calc(100svh - 140px); /* ヘッダー＋下ボタン分の余白（必要なら調整） */
+        border-radius:10px;
+      }
+      @supports not (height: 1svh) { canvas{ max-height:87vh; } }
+      .mobile-controls{ display:flex; padding-bottom:max(12px, env(safe-area-inset-bottom)); }
     }
   </style>
 </head>
 <body>
   <div id="ui">
     名前：<input id="player" type="text" />
+
+    <!-- パターン選択（Aのみ実装／Bは将来） -->
+    <label>モード：</label>
+    <label style="background:transparent; padding:0 4px;">
+      <input type="radio" name="pattern" id="patternA" value="A" checked>
+      A（通常5 + フラッシュ5）
+    </label>
+    <label style="background:transparent; padding:0 4px; opacity:.5;">
+      <input type="radio" name="pattern" id="patternB" value="B" disabled>
+      B（後日）
+    </label>
+
     <button id="start">開始</button>
     <button id="judge">判定</button>
+
+    <!-- 任意（問題選択UI：デバッグ用に残しておくなら表示） -->
     <label>課題：</label>
     <select id="puzzleSelect"></select>
     <span> / 現在：<strong id="puzzleTitle">—</strong></span>
+
     <div id="timer">00:00</div>
   </div>
 
