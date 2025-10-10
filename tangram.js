@@ -1,14 +1,10 @@
-// Tangram – StartScreen + Pattern A(通常5 + フラッシュ5) 完全版
+// Tangram – StartScreen + PrimeScreen + PNG Answer Flash 完全版
 
 document.addEventListener('DOMContentLoaded', () => {
-  // ===== 設定（必要に応じて） =====
-  const ENDPOINT_URL = 'PUT_APPS_SCRIPT_WEB_APP_URL_HERE';
-  const POST_TOKEN   = 'PUT_RANDOM_TOKEN_HERE';
-  const APP_VERSION  = 'tangramAB-1.2.0';
-
+  const APP_VERSION  = 'tangramAB-1.4.0';
   const WORLD_W=1500, WORLD_H=900, SNAP_DISTANCE=25;
 
-  // ---- Tangram A_1（既存5問）----
+  // ---- A_1（前半5問）----
   const PUZZLES_A = [
     { title: "アヒル", target: [[482,394],[588,288],[800,288],[800,182],[906,182],[1012,182],[906,288],[906,394],[800,500],[588,500]] },
     { title: "凹み",   target: [[482,182],[588,182],[588,394],[800,394],[800,182],[906,182],[906,500],[482,500]] },
@@ -16,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     { title: "コマ",   target: [[482,394],[588,288],[641,288],[641,182],[747,182],[747,288],[800,288],[906,394],[694,606]] },
     { title: "サカナ", target: [[332,356],[544,356],[619,281],[469,281],[544,206],[694,206],[844,356],[694,506],[694,612],[588,612],[694,506],[619,431],[544,506],[394,506],[438,462]] },
   ];
-  // ---- Tangram B_2（後半5問）----
+  // ---- B_2（後半5問）----
   const PUZZLES_B2 = [
     { title: "狐",     target: [[270,288],[376,394],[482,394],[694,394],[800,394],[800,288],[906,394],[981,319],[981,469],[906,544],[831,469],[694,606],[694,544],[544,544],[482,606],[482,394],[376,288]] },
     { title: "猫",     target: [[244,288],[350,288],[456,394],[456,244],[756,244],[831,319],[831,169],[906,244],[981,169],[981,319],[906,394],[606,394],[456,394],[350,394]] },
@@ -25,7 +21,17 @@ document.addEventListener('DOMContentLoaded', () => {
     { title: "魚B",    target: [[482,288],[694,288],[588,182],[694,182],[906,394],[696,606],[588,606],[694,500],[482,500],[588,394]] },
   ];
 
-  // ---- Tangram Pieces ----
+  // ---- PNG のマッピング（タイトル→パス）----
+  const ANSWER_IMAGE_MAP = {
+    '狐':      'answers/kitsune.png',
+    '猫':      'answers/neko.png',
+    'ライオン': 'answers/lion.png',
+    'ネッシー': 'answers/nessie.png',
+    '魚B':     'answers/fishB.png',
+    // ※前半5問は画像なし（シルエットは出しません）
+  };
+
+  // ---- Tangram ピース ----
   const TANGRAM_PIECES = [
     [[0,0],[300,0],[150,150]],
     [[0,0],[0,300],[150,150]],
@@ -37,7 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
   ];
   const COLORS=["#FF6B6B","#FFD93D","#6BCB77","#4D96FF","#9B59B6","#F39C12","#1ABC9C"];
 
-  // ---- Utils ----
+  // ---- ユーティリティ ----
   const $id = id => document.getElementById(id);
   const fmtTime = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
   const deg = d => d*Math.PI/180;
@@ -52,24 +58,14 @@ document.addEventListener('DOMContentLoaded', () => {
   function drawPolygon(ctx, pts, fill=null, stroke="#222", lw=2){ if(!pts.length) return; drawPath(ctx, pts); if(fill){ctx.fillStyle=fill; ctx.fill();} if(stroke&&lw){ctx.strokeStyle=stroke; ctx.lineWidth=lw; ctx.stroke();} }
   function alphaCount(ctx,w,h){ const d=ctx.getImageData(0,0,w,h).data; let c=0; for(let i=3;i<d.length;i+=4){ if(d[i]!==0) c++; } return c; }
 
-  // ---- State ----
-  const state={
-    pieces:[], selectedId:null, puzzleIndex:0, step:'home',
-    results:[], elapsed:0, timerId:null,
-    pattern:'A',
-    flashUntil:0
-  };
-
-  // 進行用（今回Aのみ）
-  let ACTIVE_PUZZLES = PUZZLES_A.slice();
-  let FLASH_FLAGS    = new Array(PUZZLES_A.length).fill(false);
-  const FLASH_MS     = 700;
-
-  // ---- UI Elements（開始画面 & ゲームUI）----
+  // ---- 画面要素 ----
   const startScreen   = $id('startScreen');
   const playerEntry   = $id('playerEntry');
   const patternAEntry = $id('patternAEntry');
   const startGo       = $id('startGo');
+
+  const primeScreen   = $id('primeScreen');
+  const primeGo       = $id('primeGo');
 
   const uiToolbar     = $id('ui');
   const stageWrap     = $id('stageWrap');
@@ -78,35 +74,55 @@ document.addEventListener('DOMContentLoaded', () => {
   const playerInput   = $id('player');
   const patternA      = $id('patternA');
   const patternB      = $id('patternB');
-  const puzzleSelect  = $id('puzzleSelect'); // 1回だけ定義（重複定義しない）
   const puzzleTitle   = $id('puzzleTitle');
   const timerEl       = $id('timer');
 
-  // ===== 初期表示：開始画面のみ見せる =====
-  uiToolbar.classList.add('hidden');
-  stageWrap.classList.add('hidden');
-  mobileCtrls.classList.add('hidden');
+  // ---- ステート ----
+  const state={
+    pieces:[], selectedId:null, puzzleIndex:0,
+    step:'home',       // home -> play -> prime -> play -> finished
+    results:[], elapsed:0, timerId:null,
+    pattern:'A', flashUntil:0
+  };
 
-  // 名前が入ったら「開始」活性化
-  playerEntry.addEventListener('input', () => {
-    startGo.disabled = !playerEntry.value.trim();
-  });
+  // 進行セット（固定順）
+  let ACTIVE_PUZZLES = PUZZLES_A.concat(PUZZLES_B2); // 10面
+  const FLASH_FLAGS = [
+    ...new Array(PUZZLES_A.length).fill(false), // 前半：画像なし
+    ...new Array(PUZZLES_B2.length).fill(true)  // 後半：画像あり
+  ];
+  const FLASH_MS = 1000; // 1秒フェード
 
-  // 開始画面の開始ボタン
+  // ===== PNG 事前読み込み =====
+  const loadedImages = {}; // title -> HTMLImageElement
+  (function preloadAnswerPNGs(){
+    Object.entries(ANSWER_IMAGE_MAP).forEach(([title,src])=>{
+      const img = new Image();
+      img.onload  = ()=>{ loadedImages[title]=img; };
+      img.onerror = ()=>{ console.warn('answer image missing:', src); };
+      // 同一オリジン（GitHub Pages 同リポ内）なら crossOrigin 不要
+      img.src = src;
+    });
+  })();
+
+  // ===== 初期表示：開始画面のみ =====
+  uiToolbar.classList.add('hidden'); stageWrap.classList.add('hidden'); mobileCtrls.classList.add('hidden');
+  playerEntry.addEventListener('input', () => { startGo.disabled = !playerEntry.value.trim(); });
+
   startGo.addEventListener('click', () => {
-    // 値をツールバーへコピー
     playerInput.value = playerEntry.value.trim();
     if (patternAEntry.checked) patternA.checked = true;
-    // 画面切り替え
     startScreen.classList.add('hidden');
-    uiToolbar.classList.remove('hidden');
-    stageWrap.classList.remove('hidden');
-    mobileCtrls.classList.remove('hidden');
-    // 実ゲーム開始
-    startSeries();
+    uiToolbar.classList.remove('hidden'); stageWrap.classList.remove('hidden'); mobileCtrls.classList.remove('hidden');
+    startFirstHalf();
   });
 
-  // ---- Pieces reset ----
+  primeGo.addEventListener('click', () => {
+    primeScreen.classList.add('hidden');
+    startSecondHalf();
+  });
+
+  // ---- ピース初期化 ----
   function resetPieces(){
     state.pieces = TANGRAM_PIECES.map((shape,i)=>({
       id:i, shape:shape.map(([x,y])=>[x,y]),
@@ -117,33 +133,58 @@ document.addEventListener('DOMContentLoaded', () => {
     state.selectedId=null;
   }
 
-  // ---- Canvas ----
+  // ---- キャンバス ----
   const canvas=$id('game'); if(!canvas){ alert('canvas #game が見つかりません'); return; }
   const ctx=canvas.getContext('2d',{willReadFrequently:true});
   canvas.style.touchAction='none';
 
-  // Offscreens（判定用）
+  // Offscreens（判定）
   const offT=document.createElement('canvas'); offT.width=WORLD_W; offT.height=WORLD_H; const ctxT=offT.getContext('2d',{willReadFrequently:true});
   const offU=document.createElement('canvas'); offU.width=WORLD_W; offU.height=WORLD_H; const ctxU=offU.getContext('2d',{willReadFrequently:true});
   const offUd=document.createElement('canvas'); offUd.width=WORLD_W; offUd.height=WORLD_H; const ctxUd=offUd.getContext('2d',{willReadFrequently:true});
   const tmp=document.createElement('canvas'); tmp.width=WORLD_W; tmp.height=WORLD_H; const ctxX=tmp.getContext('2d',{willReadFrequently:true});
-  [ctxT,ctxU,ctxUd,ctxX].forEach(c=>c.imageSmoothingEnabled=false);
+  ;[ctxT,ctxU,ctxUd,ctxX].forEach(c=>c.imageSmoothingEnabled=false);
 
   function resizeCanvas(){ canvas.width=WORLD_W; canvas.height=WORLD_H; }
   window.addEventListener('resize',resizeCanvas); resizeCanvas();
 
-  // ---- Render Loop ----
+  // ---- ヘルパ：ターゲットの外接矩形 ----
+  function targetBounds(pts){
+    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    for(const [x,y] of pts){ if(x<minX)minX=x; if(y<minY)minY=y; if(x>maxX)maxX=x; if(y>maxY)maxY=y; }
+    return { x:minX, y:minY, w:(maxX-minX), h:(maxY-minY) };
+  }
+
+  // ---- 描画ループ ----
   function render(){
     ctx.clearRect(0,0,WORLD_W,WORLD_H);
-    const tgt = ACTIVE_PUZZLES[state.puzzleIndex].target;
+
+    const cur = ACTIVE_PUZZLES[state.puzzleIndex];
+    const tgt = cur.target;
+
+    // ターゲット（黒シルエット）
     drawPolygon(ctx, tgt, '#2b2b2b', '#444', 2);
 
-    if (state.flashUntil && Date.now() < state.flashUntil) {
-      ctx.save();
-      drawPolygon(ctx, tgt, 'rgba(255,255,255,0.25)', '#ff4444', 6);
-      ctx.restore();
+    // フラッシュ：PNG を外接矩形にフィット描画（フェード）
+    if (state.flashUntil && Date.now() < state.flashUntil && FLASH_FLAGS[state.puzzleIndex]) {
+      const a = Math.max(0, Math.min(1, (state.flashUntil - Date.now()) / FLASH_MS));
+      const img = loadedImages[cur.title];
+      if (img && img.complete) {
+        const b = targetBounds(tgt);
+        ctx.save();
+        ctx.globalAlpha = 0.95 * a;
+        // 矩形に伸縮してピッタリ重ねる（PNGは透明背景推奨）
+        ctx.drawImage(img, b.x, b.y, b.w, b.h);
+        ctx.restore();
+      } else {
+        // 画像未読込時は従来のシルエット強調をフォールバック
+        ctx.save();
+        drawPolygon(ctx, tgt, `rgba(255,255,255,${0.35*a})`, `rgba(255,68,68,${0.9*a})`, 10);
+        ctx.restore();
+      }
     }
 
+    // ピース
     const ts=state.pieces.map(p=>({...p,world:transform(p.shape,p.offset,p.angle,p.flipped)}));
     ts.forEach(p=>{ ctx.save(); ctx.shadowColor='rgba(0,0,0,.22)'; ctx.shadowBlur=8; ctx.shadowOffsetY=4; drawPolygon(ctx,p.world,p.color,'#1a1a1a',2); ctx.restore(); });
     if(state.selectedId!=null){ const p=ts.find(pp=>pp.id===state.selectedId); if(p){ ctx.save(); ctx.setLineDash([6,4]); drawPolygon(ctx,p.world,null,'#e5e7eb',2); ctx.restore(); } }
@@ -151,7 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   requestAnimationFrame(render);
 
-  // ---- Hit Test ----
+  // ---- 当たり判定 & ドラッグ ----
   function hitTest(x,y){
     for(let i=state.pieces.length-1;i>=0;i--){
       const p=state.pieces[i], world=transform(p.shape,p.offset,p.angle,p.flipped);
@@ -159,8 +200,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     return null;
   }
-
-  // ---- Pointer Drag ----
   const drag={active:false,id:null,last:[0,0]};
   function canvasXY(e){ const r=canvas.getBoundingClientRect(); const sx=canvas.width/r.width, sy=canvas.height/r.height; return [(e.clientX-r.left)*sx,(e.clientY-r.top)*sy]; }
   canvas.addEventListener('pointerdown',e=>{
@@ -186,18 +225,16 @@ document.addEventListener('DOMContentLoaded', () => {
   canvas.addEventListener('pointercancel',()=>{ drag.active=false; drag.id=null; drag.last=[0,0]; },{passive:false});
 
   // ---- 回転 / 反転 ----
-  function rotateSelected(){ if(state.selectedId==null) return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,angle:(p.angle+45)%360}:p); }
-  function flipSelected(){ if(state.selectedId==null) return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,flipped:!p.flipped}:p); }
+  function rotateSelected(){ if(state.selectedId==null || state.step!=='play') return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,angle:(p.angle+45)%360}:p); }
+  function flipSelected(){ if(state.selectedId==null || state.step!=='play') return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,flipped:!p.flipped}:p); }
   window.addEventListener('keydown',(e)=>{ if(state.step!=='play'||state.selectedId==null) return; if(e.key==='r'||e.key==='R') rotateSelected(); if(e.key==='f'||e.key==='F') flipSelected(); });
 
   // ---- 判定（整数化 + 3px拡張）----
-  const offCalc = {ctxT, ctxU, ctxUd, ctxX: tmp.getContext('2d',{willReadFrequently:true})}; // 余分な再取得回避
   function drawDilated(ctx, pts, dilatePx){
     drawPath(ctx, pts); ctx.fillStyle='#000'; ctx.fill();
     if(dilatePx>0){ ctx.lineWidth=dilatePx*2; ctx.lineJoin='miter'; ctx.miterLimit=8; ctx.strokeStyle='#000'; ctx.stroke(); }
   }
   function judge(){
-    const {ctxT,ctxU,ctxUd,ctxX} = offCalc;
     const tol=3;
     const tgt = roundPts(ACTIVE_PUZZLES[state.puzzleIndex].target);
     const polys = state.pieces.map(p=> roundPts(transform(p.shape,p.offset,p.angle,p.flipped)));
@@ -245,70 +282,60 @@ document.addEventListener('DOMContentLoaded', () => {
   function resetTimer(){ stopTimer(); state.elapsed=0; updateTimer(); }
   function startTimer(){ stopTimer(); startAt=Date.now(); state.timerId=setInterval(()=>{ state.elapsed=Math.floor((Date.now()-startAt)/1000); updateTimer(); },500); }
 
-  // ---- ツールバーのボタン紐付け ----
+  // ---- 操作ボタン ----
   const bind=(id,ev,fn)=>{ const el=$id(id); if(el) el.addEventListener(ev,fn,{passive:false}); };
-  bind('start','click', startSeries);
+  bind('start','click', () => { if(state.step==='home') startFirstHalf(); });
   bind('judge','click', onJudge);
   bind('rotateMobile','click', rotateSelected);
   bind('flipMobile','click',  flipSelected);
 
-  // ---- パターン設定（Aのみ）----
-  function configurePatternA(){
-    ACTIVE_PUZZLES = PUZZLES_A.concat(PUZZLES_B2);
-    FLASH_FLAGS = [
-      ...new Array(PUZZLES_A.length).fill(false),
-      ...new Array(PUZZLES_B2.length).fill(true)
-    ];
-    if (puzzleSelect) {
-      puzzleSelect.innerHTML='';
-      ACTIVE_PUZZLES.forEach((p,i)=>{
-        const o=document.createElement('option');
-        o.value=i; o.textContent=`${i+1}. ${p.title}`;
-        puzzleSelect.appendChild(o);
-      });
-    }
-  }
-
+  // ---- 前半/後半開始 & フラッシュ ----
   function setPuzzleTitle(){ if(puzzleTitle) puzzleTitle.textContent=ACTIVE_PUZZLES[state.puzzleIndex].title; }
-
-  // フラッシュ（答えシルエットを一瞬表示）
   function flashIfNeeded(){
     if (!FLASH_FLAGS[state.puzzleIndex]) return;
-    const until = Date.now() + FLASH_MS;
-    state.flashUntil = until;
-    setTimeout(()=>{ if(state.flashUntil===until) state.flashUntil=0; }, FLASH_MS + 30);
+    state.flashUntil = Date.now() + FLASH_MS;
+    setTimeout(()=>{ if(Date.now()>=state.flashUntil) state.flashUntil=0; }, FLASH_MS + 40);
   }
-
-  // ---- 開始処理 ----
-  function startSeries(){
-    if(!playerInput || !playerInput.value.trim()){ alert('名前を入力してください'); return; }
-    state.pattern = (patternA && patternA.checked) ? 'A' : 'A'; // Bは将来
-    configurePatternA();
-
+  function startFirstHalf(){
+    state.pattern='A';
     state.step='play';
     state.results=[];
     state.puzzleIndex=0;
-    if (puzzleSelect) puzzleSelect.value='0';
     setPuzzleTitle(); resetPieces(); resetTimer(); startTimer();
-    flashIfNeeded();
+    // 前半はフラッシュなし
+  }
+  function startSecondHalf(){
+    state.step='play';
+    state.puzzleIndex=5;        // 後半の先頭へ
+    setPuzzleTitle(); resetPieces(); resetTimer(); startTimer();
+    flashIfNeeded();            // 後半は開始時にフラッシュ
   }
 
-  // ---- 判定ボタン ----
+  // ---- 判定→次へ ----
   function onJudge(){
     const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
     stopTimer();
+
     state.results.push({
       puzzleIndex: state.puzzleIndex + 1,
       flashed: !!FLASH_FLAGS[state.puzzleIndex],
       timeSec: state.elapsed
     });
 
+    // 前半の最後→プライミング画面へ
+    if(state.puzzleIndex === 4){
+      alert(`CLEAR!\n課題: ${ACTIVE_PUZZLES[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
+      state.step='prime';
+      primeScreen.classList.remove('hidden');
+      return;
+    }
+
+    // 通常遷移
     if(state.puzzleIndex<ACTIVE_PUZZLES.length-1){
       alert(`CLEAR!\n課題: ${ACTIVE_PUZZLES[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
       state.puzzleIndex++;
-      if (puzzleSelect) puzzleSelect.value=String(state.puzzleIndex);
       setPuzzleTitle(); resetPieces(); resetTimer(); startTimer();
-      flashIfNeeded();
+      flashIfNeeded(); // 後半は毎問フラッシュ
     }else{
       const total=state.results.reduce((a,b)=>a+b.timeSec,0);
       alert(`10問クリア！合計: ${total} 秒`);
@@ -316,11 +343,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ---- 初期セットアップ（リストだけ作っておく）----
-  configurePatternA();
-  setPuzzleTitle();
-  resetPieces();
-  updateTimer();
+  // 初期セット（タイトルだけ）
+  setPuzzleTitle(); resetPieces(); updateTimer();
 
   // PC向けショートカット表記
   (function addShortcutHint(){
