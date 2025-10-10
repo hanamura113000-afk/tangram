@@ -1,10 +1,10 @@
-// Tangram – StartScreen + PrimeScreen + PNG Answer Flash + Aspect-Ratio 完全版
+// Tangram – PNG専用フラッシュ画面 + スマホどこでもドラッグ 完全版
 
 document.addEventListener('DOMContentLoaded', () => {
-  const APP_VERSION  = 'tangramAB-1.5.0';
+  const APP_VERSION  = 'tangramAB-1.6.0';
   const WORLD_W=1500, WORLD_H=900, SNAP_DISTANCE=25;
 
-  // ---- A_1（前半5問）----
+  // ---- 前半5問（プレビューなし）----
   const PUZZLES_A = [
     { title: "アヒル", target: [[482,394],[588,288],[800,288],[800,182],[906,182],[1012,182],[906,288],[906,394],[800,500],[588,500]] },
     { title: "凹み",   target: [[482,182],[588,182],[588,394],[800,394],[800,182],[906,182],[906,500],[482,500]] },
@@ -12,7 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
     { title: "コマ",   target: [[482,394],[588,288],[641,288],[641,182],[747,182],[747,288],[800,288],[906,394],[694,606]] },
     { title: "サカナ", target: [[332,356],[544,356],[619,281],[469,281],[544,206],[694,206],[844,356],[694,506],[694,612],[588,612],[694,506],[619,431],[544,506],[394,506],[438,462]] },
   ];
-  // ---- B_2（後半5問）----
+  // ---- 後半5問（毎問PNGプレビュー）----
   const PUZZLES_B2 = [
     { title: "狐",     target: [[270,288],[376,394],[482,394],[694,394],[800,394],[800,288],[906,394],[981,319],[981,469],[906,544],[831,469],[694,606],[694,544],[544,544],[482,606],[482,394],[376,288]] },
     { title: "猫",     target: [[244,288],[350,288],[456,394],[456,244],[756,244],[831,319],[831,169],[906,244],[981,169],[981,319],[906,394],[606,394],[456,394],[350,394]] },
@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
     { title: "魚B",    target: [[482,288],[694,288],[588,182],[694,182],[906,394],[696,606],[588,606],[694,500],[482,500],[588,394]] },
   ];
 
-  // 後半で表示する PNG（index.html と同階層に /answers で配置）
+  // 後半で使う答えPNG（index.html と同階層に /answers）
   const ANSWER_IMAGE_MAP = {
     '狐':      'answers/kitsune.png',
     '猫':      'answers/neko.png',
@@ -56,30 +56,8 @@ document.addEventListener('DOMContentLoaded', () => {
   function drawPath(ctx, pts){ ctx.beginPath(); pts.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.closePath(); }
   function drawPolygon(ctx, pts, fill=null, stroke="#222", lw=2){ if(!pts.length) return; drawPath(ctx, pts); if(fill){ctx.fillStyle=fill; ctx.fill();} if(stroke&&lw){ctx.strokeStyle=stroke; ctx.lineWidth=lw; ctx.stroke();} }
   function alphaCount(ctx,w,h){ const d=ctx.getImageData(0,0,w,h).data; let c=0; for(let i=3;i<d.length;i+=4){ if(d[i]!==0) c++; } return c; }
-  // ターゲット外接矩形
-  function targetBounds(pts){
-    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
-    for(const [x,y] of pts){ if(x<minX)minX=x; if(y<minY)minY=y; if(x>maxX)maxX=x; if(y>maxY)maxY=y; }
-    return { x:minX, y:minY, w:(maxX-minX), h:(maxY-minY) };
-  }
-  // PNGを縦横比維持でフィット＋多角形でクリップ
-  function drawImageInPolygonFit(ctx, img, polygon, alpha=1){
-    const b = targetBounds(polygon);
-    const iw = img.naturalWidth  || img.width;
-    const ih = img.naturalHeight || img.height;
-    const scale = Math.min(b.w/iw, b.h/ih);  // contain
-    const sw = iw * scale,  sh = ih * scale;
-    const dx = b.x + (b.w - sw)/2;
-    const dy = b.y + (b.h - sh)/2;
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    drawPath(ctx, polygon); ctx.clip();
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(img, dx, dy, sw, sh);
-    ctx.restore();
-  }
 
-  // ---- 画面要素 ----
+  // ---- DOM ----
   const startScreen   = $id('startScreen');
   const playerEntry   = $id('playerEntry');
   const patternAEntry = $id('patternAEntry');
@@ -87,6 +65,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const primeScreen   = $id('primeScreen');
   const primeGo       = $id('primeGo');
+
+  const answerScreen  = $id('answerScreen');
+  const answerImg     = $id('answerImg');
 
   const uiToolbar     = $id('ui');
   const stageWrap     = $id('stageWrap');
@@ -98,34 +79,33 @@ document.addEventListener('DOMContentLoaded', () => {
   const puzzleTitle   = $id('puzzleTitle');
   const timerEl       = $id('timer');
 
-  // ---- ステート ----
+  // ---- State ----
   const state={
     pieces:[], selectedId:null, puzzleIndex:0,
-    step:'home',       // home -> play -> prime -> play -> finished
+    step:'home',       // home -> play -> prime -> (answer) -> play -> finished
     results:[], elapsed:0, timerId:null,
-    pattern:'A', flashUntil:0
   };
 
-  // 進行セット（固定順）
-  let ACTIVE_PUZZLES = PUZZLES_A.concat(PUZZLES_B2); // 10面
+  // 10面（固定順）
+  let ACTIVE_PUZZLES = PUZZLES_A.concat(PUZZLES_B2);
   const FLASH_FLAGS = [
-    ...new Array(PUZZLES_A.length).fill(false), // 前半：画像なし
-    ...new Array(PUZZLES_B2.length).fill(true)  // 後半：画像あり
+    ...new Array(PUZZLES_A.length).fill(false),
+    ...new Array(PUZZLES_B2.length).fill(true)
   ];
-  const FLASH_MS = 1000; // 1秒フェード
+  const FLASH_MS = 1000; // PNGプレビュー表示時間
 
-  // ===== PNG 事前読み込み =====
-  const loadedImages = {}; // title -> HTMLImageElement
-  (function preloadAnswerPNGs(){
+  // 画像プリロード
+  const loadedImages = {};
+  (function preload(){
     Object.entries(ANSWER_IMAGE_MAP).forEach(([title,src])=>{
-      const img = new Image();
-      img.onload  = ()=>{ loadedImages[title]=img; };
-      img.onerror = ()=>{ console.warn('answer image missing:', src); };
-      img.src = src;
+      const img=new Image();
+      img.onload=()=>{loadedImages[title]=img;};
+      img.onerror=()=>{console.warn('answer image missing:',src);};
+      img.src=src;
     });
   })();
 
-  // ===== 初期表示：開始画面のみ =====
+  // 初期：開始画面のみ
   uiToolbar.classList.add('hidden'); stageWrap.classList.add('hidden'); mobileCtrls.classList.add('hidden');
   playerEntry.addEventListener('input', () => { startGo.disabled = !playerEntry.value.trim(); });
 
@@ -139,10 +119,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
   primeGo.addEventListener('click', () => {
     primeScreen.classList.add('hidden');
-    startSecondHalf();
+    startSecondHalf();   // 後半に入ると最初にPNGプレビューを見せる
   });
 
-  // ---- ピース初期化 ----
+  // ピース初期化
   function resetPieces(){
     state.pieces = TANGRAM_PIECES.map((shape,i)=>({
       id:i, shape:shape.map(([x,y])=>[x,y]),
@@ -153,12 +133,12 @@ document.addEventListener('DOMContentLoaded', () => {
     state.selectedId=null;
   }
 
-  // ---- キャンバス ----
+  // キャンバス
   const canvas=$id('game'); if(!canvas){ alert('canvas #game が見つかりません'); return; }
   const ctx=canvas.getContext('2d',{willReadFrequently:true});
   canvas.style.touchAction='none';
 
-  // Offscreens（判定）
+  // 判定用オフスクリーン
   const offT=document.createElement('canvas'); offT.width=WORLD_W; offT.height=WORLD_H; const ctxT=offT.getContext('2d',{willReadFrequently:true});
   const offU=document.createElement('canvas'); offU.width=WORLD_W; offU.height=WORLD_H; const ctxU=offU.getContext('2d',{willReadFrequently:true});
   const offUd=document.createElement('canvas'); offUd.width=WORLD_W; offUd.height=WORLD_H; const ctxUd=offUd.getContext('2d',{willReadFrequently:true});
@@ -168,31 +148,46 @@ document.addEventListener('DOMContentLoaded', () => {
   function resizeCanvas(){ canvas.width=WORLD_W; canvas.height=WORLD_H; }
   window.addEventListener('resize',resizeCanvas); resizeCanvas();
 
-  // ---- 描画ループ ----
+  // タイトル表示
+  function setPuzzleTitle(){ if(puzzleTitle) puzzleTitle.textContent=ACTIVE_PUZZLES[state.puzzleIndex].title; }
+
+  // ====== PNG専用フラッシュ画面 ======
+  // 画像を表示 -> FLASH_MS 後に閉じて cb() を実行
+  function showAnswerThen(cb){
+    const cur = ACTIVE_PUZZLES[state.puzzleIndex];
+    const title = cur.title;
+    const src = ANSWER_IMAGE_MAP[title];
+    if(!src){ cb?.(); return; } // 画像未指定ならスキップ
+
+    // いったんタイマーは停止
+    stopTimer();
+
+    const run = ()=>{
+      answerImg.src = src;          // 設定
+      answerScreen.classList.remove('hidden'); // 表示
+      setTimeout(()=>{              // 一定時間後に閉じる
+        answerScreen.classList.add('hidden');
+        cb?.();
+      }, FLASH_MS);
+    };
+
+    // 事前ロード済みなら即表示、未ロードならonload後に表示
+    const pre = loadedImages[title];
+    if(pre && pre.complete){ run(); }
+    else{
+      const img = new Image();
+      img.onload = run;
+      img.onerror = ()=>{ console.warn('answer image failed:', src); cb?.(); };
+      img.src = src;
+    }
+  }
+
+  // 描画ループ（フラッシュは別画面にしたのでここでは描かない）
   function render(){
     ctx.clearRect(0,0,WORLD_W,WORLD_H);
-
     const cur = ACTIVE_PUZZLES[state.puzzleIndex];
-    const tgt = cur.target;
+    drawPolygon(ctx, cur.target, '#2b2b2b', '#444', 2);
 
-    // ターゲット（黒シルエット）
-    drawPolygon(ctx, tgt, '#2b2b2b', '#444', 2);
-
-    // フラッシュ：PNG（縦横比維持でフィット+clip、1秒フェード）
-    if (state.flashUntil && Date.now() < state.flashUntil && FLASH_FLAGS[state.puzzleIndex]) {
-      const a = Math.max(0, Math.min(1, (state.flashUntil - Date.now()) / FLASH_MS));
-      const img = loadedImages[cur.title];
-      if (img && img.complete) {
-        drawImageInPolygonFit(ctx, img, tgt, 0.95*a);
-      } else {
-        // フォールバック：シルエット強調
-        ctx.save();
-        drawPolygon(ctx, tgt, `rgba(255,255,255,${0.35*a})`, `rgba(255,68,68,${0.9*a})`, 10);
-        ctx.restore();
-      }
-    }
-
-    // ピース
     const ts=state.pieces.map(p=>({...p,world:transform(p.shape,p.offset,p.angle,p.flipped)}));
     ts.forEach(p=>{ ctx.save(); ctx.shadowColor='rgba(0,0,0,.22)'; ctx.shadowBlur=8; ctx.shadowOffsetY=4; drawPolygon(ctx,p.world,p.color,'#1a1a1a',2); ctx.restore(); });
     if(state.selectedId!=null){ const p=ts.find(pp=>pp.id===state.selectedId); if(p){ ctx.save(); ctx.setLineDash([6,4]); drawPolygon(ctx,p.world,null,'#e5e7eb',2); ctx.restore(); } }
@@ -200,7 +195,11 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   requestAnimationFrame(render);
 
-  // ---- 当たり判定 & ドラッグ ----
+  // ===== スマホ：どこでもドラッグ =====
+  // ・ピースをタップしたら選択＆ドラッグ
+  // ・ピース以外をタップしても、「選択中のピース」があればドラッグ開始
+  const drag={active:false,id:null,last:[0,0]};
+  function canvasXY(e){ const r=canvas.getBoundingClientRect(); const sx=canvas.width/r.width, sy=canvas.height/r.height; return [(e.clientX-r.left)*sx,(e.clientY-r.top)*sy]; }
   function hitTest(x,y){
     for(let i=state.pieces.length-1;i>=0;i--){
       const p=state.pieces[i], world=transform(p.shape,p.offset,p.angle,p.flipped);
@@ -208,21 +207,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     return null;
   }
-  const drag={active:false,id:null,last:[0,0]};
-  function canvasXY(e){ const r=canvas.getBoundingClientRect(); const sx=canvas.width/r.width, sy=canvas.height/r.height; return [(e.clientX-r.left)*sx,(e.clientY-r.top)*sy]; }
+
   canvas.addEventListener('pointerdown',e=>{
     if(state.step!=='play') return; e.preventDefault(); canvas.setPointerCapture(e.pointerId);
-    const [x,y]=canvasXY(e); const id=hitTest(x,y);
-    if(id!=null){ drag.active=true; drag.id=id; drag.last=[x,y]; state.selectedId=id; const idx=state.pieces.findIndex(p=>p.id===id); const [pk]=state.pieces.splice(idx,1); state.pieces.push(pk); }
+    const [x,y]=canvasXY(e);
+    const id=hitTest(x,y);
+    let moveId = id!=null ? id : state.selectedId;   // ← ピース外でも選択中を動かす
+    if(moveId!=null){
+      drag.active=true; drag.id=moveId; drag.last=[x,y];
+      if(id!=null){ // 新しく触ったピースを選択＆最前面へ
+        state.selectedId=id;
+        const idx=state.pieces.findIndex(p=>p.id===id); const [pk]=state.pieces.splice(idx,1); state.pieces.push(pk);
+      }
+    }
   },{passive:false});
+
   canvas.addEventListener('pointermove',e=>{
     if(!drag.active) return; e.preventDefault();
     const [x,y]=canvasXY(e); const dx=x-drag.last[0], dy=y-drag.last[1]; drag.last=[x,y];
     const id=drag.id; state.pieces=state.pieces.map(p=>p.id===id?{...p,offset:[p.offset[0]+dx,p.offset[1]+dy]}:p);
   },{passive:false});
+
   canvas.addEventListener('pointerup',e=>{
     if(!drag.active) return; e.preventDefault();
     const id=drag.id; drag.active=false; drag.id=null; drag.last=[0,0];
+
+    // スナップ
     const me=state.pieces.find(p=>p.id===id); const myPts=transform(me.shape,me.offset,me.angle,me.flipped);
     const targetPts=ACTIVE_PUZZLES[state.puzzleIndex].target;
     const others=state.pieces.filter(p=>p.id!==id).flatMap(p=>transform(p.shape,p.offset,p.angle,p.flipped));
@@ -230,14 +240,17 @@ document.addEventListener('DOMContentLoaded', () => {
     for(const mp of myPts){ for(const tp of snaps){ const d2=distanceSq(mp,tp); if(d2<bestD2){bestD2=d2; best=[tp[0]-mp[0],tp[1]-mp[1]];} } }
     if(best){ me.offset=[me.offset[0]+best[0], me.offset[1]+best[1]]; }
   },{passive:false});
+
   canvas.addEventListener('pointercancel',()=>{ drag.active=false; drag.id=null; drag.last=[0,0]; },{passive:false});
 
-  // ---- 回転 / 反転 ----
+  // 回転 / 反転
   function rotateSelected(){ if(state.selectedId==null || state.step!=='play') return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,angle:(p.angle+45)%360}:p); }
   function flipSelected(){ if(state.selectedId==null || state.step!=='play') return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,flipped:!p.flipped}:p); }
   window.addEventListener('keydown',(e)=>{ if(state.step!=='play'||state.selectedId==null) return; if(e.key==='r'||e.key==='R') rotateSelected(); if(e.key==='f'||e.key==='F') flipSelected(); });
+  $id('rotateMobile')?.addEventListener('click', rotateSelected);
+  $id('flipMobile')?.addEventListener('click',  flipSelected);
 
-  // ---- 判定（整数化 + 3px拡張）----
+  // 判定（整数化 + 3px拡張）
   function drawDilated(ctx, pts, dilatePx){
     drawPath(ctx, pts); ctx.fillStyle='#000'; ctx.fill();
     if(dilatePx>0){ ctx.lineWidth=dilatePx*2; ctx.lineJoin='miter'; ctx.miterLimit=8; ctx.strokeStyle='#000'; ctx.stroke(); }
@@ -283,55 +296,36 @@ document.addEventListener('DOMContentLoaded', () => {
     return {ok:true};
   }
 
-  // ---- タイマー ----
+  // タイマー
   let startAt=0;
   function updateTimer(){ if(timerEl) timerEl.textContent=fmtTime(state.elapsed); }
   function stopTimer(){ if(state.timerId){ clearInterval(state.timerId); state.timerId=null; } }
   function resetTimer(){ stopTimer(); state.elapsed=0; updateTimer(); }
   function startTimer(){ stopTimer(); startAt=Date.now(); state.timerId=setInterval(()=>{ state.elapsed=Math.floor((Date.now()-startAt)/1000); updateTimer(); },500); }
 
-  // ---- 操作ボタン ----
-  const bind=(id,ev,fn)=>{ const el=$id(id); if(el) el.addEventListener(ev,fn,{passive:false}); };
-  bind('start','click', () => { if(state.step==='home') startFirstHalf(); });
-  bind('judge','click', onJudge);
-  bind('rotateMobile','click', rotateSelected);
-  bind('flipMobile','click',  flipSelected);
+  // ボタン
+  $id('start')?.addEventListener('click', () => { if(state.step==='home') startFirstHalf(); });
+  $id('judge')?.addEventListener('click', onJudge);
 
-  // ---- 前半/後半開始 & フラッシュ ----
-  function setPuzzleTitle(){ if(puzzleTitle) puzzleTitle.textContent=ACTIVE_PUZZLES[state.puzzleIndex].title; }
-  function flashIfNeeded(){
-    if (!FLASH_FLAGS[state.puzzleIndex]) return;
-    state.flashUntil = Date.now() + FLASH_MS;
-    setTimeout(()=>{ if(Date.now()>=state.flashUntil) state.flashUntil=0; }, FLASH_MS + 40);
-  }
+  // 前半/後半開始
   function startFirstHalf(){
-    state.pattern='A';
-    state.step='play';
-    state.results=[];
-    state.puzzleIndex=0;
+    state.step='play'; state.results=[]; state.puzzleIndex=0;
     setPuzzleTitle(); resetPieces(); resetTimer(); startTimer();
-    // 前半はフラッシュなし
   }
   function startSecondHalf(){
-    state.step='play';
-    state.puzzleIndex=5;        // 後半の先頭へ
-    setPuzzleTitle(); resetPieces(); resetTimer(); startTimer();
-    flashIfNeeded();            // 後半は開始時にフラッシュ
+    state.step='play'; state.puzzleIndex=5;
+    setPuzzleTitle(); resetPieces(); resetTimer();
+    showAnswerThen(()=>{ startTimer(); }); // ← PNGだけの画面を表示してから開始
   }
 
-  // ---- 判定→次へ ----
+  // 判定→次へ
   function onJudge(){
     const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
     stopTimer();
+    state.results.push({ puzzleIndex: state.puzzleIndex+1, flashed: !!FLASH_FLAGS[state.puzzleIndex], timeSec: state.elapsed });
 
-    state.results.push({
-      puzzleIndex: state.puzzleIndex + 1,
-      flashed: !!FLASH_FLAGS[state.puzzleIndex],
-      timeSec: state.elapsed
-    });
-
-    // 前半最後→プライミング画面へ
-    if(state.puzzleIndex === 4){
+    // 前半の最後 → 中間画面へ
+    if(state.puzzleIndex===4){
       alert(`CLEAR!\n課題: ${ACTIVE_PUZZLES[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
       state.step='prime';
       primeScreen.classList.remove('hidden');
@@ -342,8 +336,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if(state.puzzleIndex<ACTIVE_PUZZLES.length-1){
       alert(`CLEAR!\n課題: ${ACTIVE_PUZZLES[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
       state.puzzleIndex++;
-      setPuzzleTitle(); resetPieces(); resetTimer(); startTimer();
-      flashIfNeeded(); // 後半は毎問フラッシュ
+      setPuzzleTitle(); resetPieces(); resetTimer();
+
+      // 後半は毎問、答えPNGだけの専用画面を先に見せる
+      if(FLASH_FLAGS[state.puzzleIndex]) showAnswerThen(()=>{ startTimer(); });
+      else                               startTimer();
     }else{
       const total=state.results.reduce((a,b)=>a+b.timeSec,0);
       alert(`10問クリア！合計: ${total} 秒`);
@@ -351,7 +348,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 初期セット（タイトルだけ）
+  // 初期セット
   setPuzzleTitle(); resetPieces(); updateTimer();
 
   // UI初期状態
