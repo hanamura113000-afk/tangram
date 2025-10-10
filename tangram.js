@@ -1,7 +1,7 @@
-// Tangram – StartScreen + PrimeScreen + PNG Answer Flash 完全版
+// Tangram – StartScreen + PrimeScreen + PNG Answer Flash + Aspect-Ratio 完全版
 
 document.addEventListener('DOMContentLoaded', () => {
-  const APP_VERSION  = 'tangramAB-1.4.0';
+  const APP_VERSION  = 'tangramAB-1.5.0';
   const WORLD_W=1500, WORLD_H=900, SNAP_DISTANCE=25;
 
   // ---- A_1（前半5問）----
@@ -21,14 +21,13 @@ document.addEventListener('DOMContentLoaded', () => {
     { title: "魚B",    target: [[482,288],[694,288],[588,182],[694,182],[906,394],[696,606],[588,606],[694,500],[482,500],[588,394]] },
   ];
 
-  // ---- PNG のマッピング（タイトル→パス）----
+  // 後半で表示する PNG（index.html と同階層に /answers で配置）
   const ANSWER_IMAGE_MAP = {
     '狐':      'answers/kitsune.png',
     '猫':      'answers/neko.png',
-    'ライオン': 'answers/lion.png',
-    'ネッシー': 'answers/nessie.png',
+    'ライオン':'answers/lion.png',
+    'ネッシー':'answers/nessie.png',
     '魚B':     'answers/fishB.png',
-    // ※前半5問は画像なし（シルエットは出しません）
   };
 
   // ---- Tangram ピース ----
@@ -43,7 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
   ];
   const COLORS=["#FF6B6B","#FFD93D","#6BCB77","#4D96FF","#9B59B6","#F39C12","#1ABC9C"];
 
-  // ---- ユーティリティ ----
+  // ---- Utils ----
   const $id = id => document.getElementById(id);
   const fmtTime = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
   const deg = d => d*Math.PI/180;
@@ -57,6 +56,28 @@ document.addEventListener('DOMContentLoaded', () => {
   function drawPath(ctx, pts){ ctx.beginPath(); pts.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.closePath(); }
   function drawPolygon(ctx, pts, fill=null, stroke="#222", lw=2){ if(!pts.length) return; drawPath(ctx, pts); if(fill){ctx.fillStyle=fill; ctx.fill();} if(stroke&&lw){ctx.strokeStyle=stroke; ctx.lineWidth=lw; ctx.stroke();} }
   function alphaCount(ctx,w,h){ const d=ctx.getImageData(0,0,w,h).data; let c=0; for(let i=3;i<d.length;i+=4){ if(d[i]!==0) c++; } return c; }
+  // ターゲット外接矩形
+  function targetBounds(pts){
+    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
+    for(const [x,y] of pts){ if(x<minX)minX=x; if(y<minY)minY=y; if(x>maxX)maxX=x; if(y>maxY)maxY=y; }
+    return { x:minX, y:minY, w:(maxX-minX), h:(maxY-minY) };
+  }
+  // PNGを縦横比維持でフィット＋多角形でクリップ
+  function drawImageInPolygonFit(ctx, img, polygon, alpha=1){
+    const b = targetBounds(polygon);
+    const iw = img.naturalWidth  || img.width;
+    const ih = img.naturalHeight || img.height;
+    const scale = Math.min(b.w/iw, b.h/ih);  // contain
+    const sw = iw * scale,  sh = ih * scale;
+    const dx = b.x + (b.w - sw)/2;
+    const dy = b.y + (b.h - sh)/2;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    drawPath(ctx, polygon); ctx.clip();
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(img, dx, dy, sw, sh);
+    ctx.restore();
+  }
 
   // ---- 画面要素 ----
   const startScreen   = $id('startScreen');
@@ -100,7 +121,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const img = new Image();
       img.onload  = ()=>{ loadedImages[title]=img; };
       img.onerror = ()=>{ console.warn('answer image missing:', src); };
-      // 同一オリジン（GitHub Pages 同リポ内）なら crossOrigin 不要
       img.src = src;
     });
   })();
@@ -148,13 +168,6 @@ document.addEventListener('DOMContentLoaded', () => {
   function resizeCanvas(){ canvas.width=WORLD_W; canvas.height=WORLD_H; }
   window.addEventListener('resize',resizeCanvas); resizeCanvas();
 
-  // ---- ヘルパ：ターゲットの外接矩形 ----
-  function targetBounds(pts){
-    let minX=Infinity,minY=Infinity,maxX=-Infinity,maxY=-Infinity;
-    for(const [x,y] of pts){ if(x<minX)minX=x; if(y<minY)minY=y; if(x>maxX)maxX=x; if(y>maxY)maxY=y; }
-    return { x:minX, y:minY, w:(maxX-minX), h:(maxY-minY) };
-  }
-
   // ---- 描画ループ ----
   function render(){
     ctx.clearRect(0,0,WORLD_W,WORLD_H);
@@ -165,19 +178,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // ターゲット（黒シルエット）
     drawPolygon(ctx, tgt, '#2b2b2b', '#444', 2);
 
-    // フラッシュ：PNG を外接矩形にフィット描画（フェード）
+    // フラッシュ：PNG（縦横比維持でフィット+clip、1秒フェード）
     if (state.flashUntil && Date.now() < state.flashUntil && FLASH_FLAGS[state.puzzleIndex]) {
       const a = Math.max(0, Math.min(1, (state.flashUntil - Date.now()) / FLASH_MS));
       const img = loadedImages[cur.title];
       if (img && img.complete) {
-        const b = targetBounds(tgt);
-        ctx.save();
-        ctx.globalAlpha = 0.95 * a;
-        // 矩形に伸縮してピッタリ重ねる（PNGは透明背景推奨）
-        ctx.drawImage(img, b.x, b.y, b.w, b.h);
-        ctx.restore();
+        drawImageInPolygonFit(ctx, img, tgt, 0.95*a);
       } else {
-        // 画像未読込時は従来のシルエット強調をフォールバック
+        // フォールバック：シルエット強調
         ctx.save();
         drawPolygon(ctx, tgt, `rgba(255,255,255,${0.35*a})`, `rgba(255,68,68,${0.9*a})`, 10);
         ctx.restore();
@@ -322,7 +330,7 @@ document.addEventListener('DOMContentLoaded', () => {
       timeSec: state.elapsed
     });
 
-    // 前半の最後→プライミング画面へ
+    // 前半最後→プライミング画面へ
     if(state.puzzleIndex === 4){
       alert(`CLEAR!\n課題: ${ACTIVE_PUZZLES[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
       state.step='prime';
@@ -346,12 +354,6 @@ document.addEventListener('DOMContentLoaded', () => {
   // 初期セット（タイトルだけ）
   setPuzzleTitle(); resetPieces(); updateTimer();
 
-  // PC向けショートカット表記
-  (function addShortcutHint(){
-    const host=$id('ui')||document.body;
-    const hint=document.createElement('div');
-    hint.textContent='ショートカット：回転 R / 反転 F';
-    hint.style.cssText='margin:4px 0;font-size:12px;color:#374151;opacity:.8;';
-    host.appendChild(hint);
-  })();
+  // UI初期状態
+  uiToolbar.classList.add('hidden'); stageWrap.classList.add('hidden'); mobileCtrls.classList.add('hidden');
 });
