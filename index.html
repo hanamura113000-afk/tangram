@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
   <title>Tangram AB</title>
   <style>
-    :root { --bg:#f3f4f6; --panel:#f1f5f9; --text:#111827; --muted:#6b7280; }
+    :root { --bg:#f3f4f6; --panel:#f1f5f9; --text:#111827; }
     *{box-sizing:border-box}
     html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
     body{overscroll-behavior:none}
@@ -23,12 +23,26 @@
     #ui label{ border:none; background:transparent; padding:0 4px }
     #timer{font-weight:700;margin-left:4px}
 
-    /* キャンバス */
+    /* キャンバス（縦横比固定） */
     .stage{padding:10px}
     canvas{
-      display:block;width:100%;height:auto;max-height:75vh;
+      display:block;
+      width:100%;
+      height:auto;
+      aspect-ratio: 1500 / 900;  /* ← これで歪まない */
       background:#ffffff;border-radius:14px;box-shadow:0 2px 8px rgba(0,0,0,.06);
       touch-action:none
+    }
+
+    /* スマホ縦だけ：ゲームを大きめに */
+    @media (orientation:portrait) and (pointer:coarse){
+      #ui{ padding:6px 8px; gap:6px; }
+      .stage{ padding:4px 0; }
+      canvas{
+        width:100vw;
+        height:auto;
+        aspect-ratio: 1500 / 900;
+      }
     }
 
     /* スマホ縦だけの操作パッド */
@@ -42,17 +56,7 @@
       border:1px solid rgba(255,255,255,.25); color:#fff; background:#0b1220; touch-action:manipulation
     }
     .mobile-controls button:active{ transform:translateY(1px) }
-
-    /* ===== スマホ縦：ゲームを大きく表示 ===== */
     @media (orientation:portrait) and (pointer:coarse){
-      #ui{ padding:6px 8px; gap:6px; }
-      .stage{ padding:4px 0; }
-      canvas{
-        width:100vw;
-        max-height:calc(100svh - 140px); /* ヘッダー＋下ボタン分（調整可） */
-        border-radius:10px;
-      }
-      @supports not (height: 1svh) { canvas{ max-height:87vh; } }
       .mobile-controls{ display:flex; padding-bottom:max(12px, env(safe-area-inset-bottom)); }
     }
 
@@ -110,7 +114,7 @@
       <div class="title">プライミングあり ver</div>
       <p style="margin:8px 0 14px; line-height:1.6">
         これからの5問は、<br>
-        <strong>開始直後に「正解シルエット」を1秒だけ表示</strong>します。<br>
+        <strong>開始直後に「正解画像」を1秒だけ表示</strong>します。<br>
         準備ができたら「開始」を押してください。
       </p>
       <div class="actions">
@@ -129,10 +133,10 @@
     <button id="start">開始</button>
     <button id="judge">判定</button>
 
-    <!-- ※課題セレクトは削除（固定順）。現在の課題名のみ表示 -->
     <span> / 現在：<strong id="puzzleTitle">—</strong></span>
 
     <div id="timer">00:00</div>
+    <span style="margin-left:10px;color:#6b7280;">ショートカット：回転 R / 反転 F</span>
   </div>
 
   <div class="stage hidden" id="stageWrap">
