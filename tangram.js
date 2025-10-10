@@ -1,7 +1,8 @@
 // Tangram – PNG専用フラッシュ画面(カウントダウン付) + スマホどこでもドラッグ
+// 画像読込を decode() で待機し、最大6秒タイムアウト＆最低1.2秒表示に修正
 
 document.addEventListener('DOMContentLoaded', () => {
-  const APP_VERSION  = 'tangramAB-1.7.0';
+  const APP_VERSION  = 'tangramAB-1.8.0';
   const WORLD_W=1500, WORLD_H=900, SNAP_DISTANCE=25;
 
   // ---- 前半5問（プレビューなし）----
@@ -94,17 +95,20 @@ document.addEventListener('DOMContentLoaded', () => {
     ...new Array(PUZZLES_A.length).fill(false),
     ...new Array(PUZZLES_B2.length).fill(true)
   ];
-  const FLASH_MS = 1000;       // 画像表示時間
-  const COUNT_MS = 700;        // 1ステップのカウント時間（3→2→1）
 
-  // 画像プリロード
+  // 時間設定
+  const IMG_SHOW_MS   = 1200;   // 画像の最低表示時間（見える時間）
+  const COUNT_STEP_MS = 700;    // カウントダウン1ステップ（3→2→1）
+  const LOAD_TIMEOUT  = 6000;   // 画像の最大待機時間
+
+  // 画像プリロード（軽い先読み）
   const loadedImages = {};
   (function preload(){
     Object.entries(ANSWER_IMAGE_MAP).forEach(([title,src])=>{
       const img=new Image();
       img.onload=()=>{loadedImages[title]=img;};
-      img.onerror=()=>{console.warn('answer image missing:',src);};
-      img.src=src;
+      img.onerror=()=>{console.warn('[preload] failed:',src);};
+      img.src=src + `?v=${APP_VERSION}`; // キャッシュバスター
     });
   })();
 
@@ -153,7 +157,23 @@ document.addEventListener('DOMContentLoaded', () => {
   // タイトル表示
   function setPuzzleTitle(){ if(puzzleTitle) puzzleTitle.textContent=ACTIVE_PUZZLES[state.puzzleIndex].title; }
 
-  // ====== カウントダウン → PNG専用フラッシュ画面 ======
+  // ====== robust: カウントダウン → PNG表示（読込完了まで待つ/最大6秒） ======
+  async function loadImageWithTimeout(src, timeoutMs){
+    const img = new Image();
+    img.decoding = 'async';
+    const url = src.includes('?') ? src : `${src}?v=${APP_VERSION}`; // cache-bust
+    const to = new Promise((_, rej)=>setTimeout(()=>rej(new Error('timeout')), timeoutMs));
+    const loaded = new Promise((res, rej)=>{
+      img.onload = ()=>res(img);
+      img.onerror= ()=>rej(new Error('onerror'));
+    });
+    img.src = url;
+    // decode() があれば decode まで待つ（Safari対応で onload も併用）
+    try { await Promise.race([img.decode?.() ?? Promise.resolve(), to]); } catch(_) {}
+    await Promise.race([loaded, to]);
+    return img;
+  }
+
   function showAnswerThen(cb){
     const cur = ACTIVE_PUZZLES[state.puzzleIndex];
     const title = cur.title;
@@ -166,31 +186,41 @@ document.addEventListener('DOMContentLoaded', () => {
     countdownEl.textContent = '3';
     answerScreen.classList.remove('hidden');
 
-    // 3,2,1 カウント
-    setTimeout(()=>{ countdownEl.textContent='2'; }, COUNT_MS);
-    setTimeout(()=>{ countdownEl.textContent='1'; }, COUNT_MS*2);
+    // 3,2,1 カウント（同期的に進行）
+    const step1 = ()=>new Promise(r=>setTimeout(()=>{ countdownEl.textContent='2'; r(); }, COUNT_STEP_MS));
+    const step2 = ()=>new Promise(r=>setTimeout(()=>{ countdownEl.textContent='1'; r(); }, COUNT_STEP_MS));
+    const step3 = ()=>new Promise(r=>setTimeout(()=>{ countdownEl.textContent=''; r(); }, COUNT_STEP_MS));
 
-    // カウント後に画像読み込み＆表示
-    setTimeout(()=>{
-      countdownEl.textContent='';
-      answerCaption.textContent='読み込み中…';
-      const showImage=()=>{
-        answerCaption.textContent='1秒後に開始します';
+    (async()=>{
+      try{
+        await step1(); await step2(); await step3();
+        answerCaption.textContent='読み込み中…';
+
+        // 先にプリロード済のものがあればそれを優先
+        let img = loadedImages[title];
+        if(!img || !img.complete){
+          console.log('[flash] loading image:', src);
+          img = await loadImageWithTimeout(src, LOAD_TIMEOUT);
+        }else{
+          // complete でも decode を待つ（描画確実化）
+          try { await img.decode?.(); } catch(_){}
+        }
+
+        // 表示
+        answerImg.src = img.src;
         answerImg.classList.remove('hidden');
-        setTimeout(()=>{ answerScreen.classList.add('hidden'); cb?.(); }, FLASH_MS);
-      };
-      // 既にプリロード済なら即表示、未ロードならこの場で読み込み
-      const pre = loadedImages[title];
-      if(pre && pre.complete){
-        answerImg.src = pre.src;
-        showImage();
-      }else{
-        const img = new Image();
-        img.onload = ()=>{ answerImg.src = src; showImage(); };
-        img.onerror = ()=>{ console.warn('answer image failed:', src); answerScreen.classList.add('hidden'); cb?.(); };
-        img.src = src;
+        answerCaption.textContent='開始します…';
+        await new Promise(r=>setTimeout(r, IMG_SHOW_MS));  // 最低表示時間
+
+      }catch(err){
+        console.warn('[flash] failed:', title, src, err?.message||err);
+        answerCaption.textContent='画像を読み込めませんでした（スキップします）';
+        await new Promise(r=>setTimeout(r, 600));
+      }finally{
+        answerScreen.classList.add('hidden');
+        cb?.();
       }
-    }, COUNT_MS*3);
+    })();
   }
 
   // 描画ループ
@@ -237,14 +267,24 @@ document.addEventListener('DOMContentLoaded', () => {
   canvas.addEventListener('pointerup',e=>{
     if(!drag.active) return; e.preventDefault();
     const id=drag.id; drag.active=false; drag.id=null; drag.last=[0,0];
-    const me=state.pieces.find(p=>p.id===id); const myPts=transform(me.shape,me.offset,me.angle,me.flipped);
+    const me=state.pieces.find(p=>p.id===id); const myPts=transform(me.shape,me.offset,me.angle,my.flipped);
+  },{passive:false});
+  canvas.addEventListener('pointercancel',()=>{ drag.active=false; drag.id=null; drag.last=[0,0]; },{passive:false});
+
+  // ↑ pointerup 内の my 変数タイポ修正
+  canvas.removeEventListener('pointerup', ()=>{});
+  canvas.addEventListener('pointerup',e=>{
+    if(!drag.active) return; e.preventDefault();
+    const id=drag.id; drag.active=false; drag.id=null; drag.last=[0,0];
+
+    const me=state.pieces.find(p=>p.id===id);
+    const myPts=transform(me.shape,me.offset,me.angle,me.flipped);
     const targetPts=ACTIVE_PUZZLES[state.puzzleIndex].target;
     const others=state.pieces.filter(p=>p.id!==id).flatMap(p=>transform(p.shape,p.offset,p.angle,p.flipped));
     const snaps=[...targetPts,...others]; let best=null, bestD2=SNAP_DISTANCE*SNAP_DISTANCE;
     for(const mp of myPts){ for(const tp of snaps){ const d2=distanceSq(mp,tp); if(d2<bestD2){bestD2=d2; best=[tp[0]-mp[0],tp[1]-mp[1]];} } }
     if(best){ me.offset=[me.offset[0]+best[0], me.offset[1]+best[1]]; }
   },{passive:false});
-  canvas.addEventListener('pointercancel',()=>{ drag.active=false; drag.id=null; drag.last=[0,0]; },{passive:false});
 
   // 回転 / 反転
   function rotateSelected(){ if(state.selectedId==null || state.step!=='play') return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,angle:(p.angle+45)%360}:p); }
