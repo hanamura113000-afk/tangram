@@ -11,7 +11,7 @@
     body{overscroll-behavior:none}
     .hidden{display:none!important}
 
-    /* 上部UI（ゲーム画面用ツールバー） */
+    /* ツールバー */
     #ui{
       position:sticky;top:0;z-index:10;background:var(--panel);
       padding:8px 10px;border-bottom:1px solid #e5e7eb;
@@ -29,23 +29,19 @@
       display:block;
       width:100%;
       height:auto;
-      aspect-ratio: 1500 / 900;  /* ← これで歪まない */
+      aspect-ratio: 1500 / 900;  /* 歪み防止 */
       background:#ffffff;border-radius:14px;box-shadow:0 2px 8px rgba(0,0,0,.06);
       touch-action:none
     }
 
-    /* スマホ縦だけ：ゲームを大きめに */
+    /* スマホ縦：大きめ表示 */
     @media (orientation:portrait) and (pointer:coarse){
       #ui{ padding:6px 8px; gap:6px; }
       .stage{ padding:4px 0; }
-      canvas{
-        width:100vw;
-        height:auto;
-        aspect-ratio: 1500 / 900;
-      }
+      canvas{ width:100vw; height:auto; aspect-ratio:1500 / 900; }
     }
 
-    /* スマホ縦だけの操作パッド */
+    /* モバイル回転/反転ボタン */
     .mobile-controls{
       position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
       display:none; gap:12px; z-index:50;
@@ -60,7 +56,7 @@
       .mobile-controls{ display:flex; padding-bottom:max(12px, env(safe-area-inset-bottom)); }
     }
 
-    /* ===== フルスクリーン画面（開始/プライミング） ===== */
+    /* ===== フルスクリーン画面（開始/プライミング/答えプレビュー） ===== */
     .screen{
       position:fixed; inset:0; z-index:100;
       display:flex; align-items:center; justify-content:center;
@@ -85,11 +81,25 @@
       border:1px solid #0ea5e9; background:#0284c7; color:#fff;
     }
     .primary:disabled{ opacity:.45; filter:grayscale(15%); }
+
+    /* 答えプレビュー専用画面 */
+    #answerScreen{ background:#ffffff; }
+    #answerWrap{
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      gap:10px;
+    }
+    #answerImg{
+      max-width:min(90vw, 1200px);
+      max-height:min(80vh, 800px);
+      width:auto; height:auto; object-fit:contain;
+      image-rendering:auto;
+    }
+    #answerCaption{ color:#475569; font-size:14px }
   </style>
 </head>
 <body>
 
-  <!-- ===== 開始画面 ===== -->
+  <!-- 開始画面 -->
   <div id="startScreen" class="screen">
     <div class="card">
       <div class="title">タングラムパズル</div>
@@ -108,13 +118,13 @@
     </div>
   </div>
 
-  <!-- ===== 中間：プライミングありver 画面 ===== -->
+  <!-- 中間：プライミングありver -->
   <div id="primeScreen" class="screen hidden">
     <div class="card">
       <div class="title">プライミングあり ver</div>
       <p style="margin:8px 0 14px; line-height:1.6">
         これからの5問は、<br>
-        <strong>開始直後に「正解画像」を1秒だけ表示</strong>します。<br>
+        <strong>開始前に「答え画像」だけを1秒表示</strong>します。<br>
         準備ができたら「開始」を押してください。
       </p>
       <div class="actions">
@@ -123,7 +133,15 @@
     </div>
   </div>
 
-  <!-- ===== ゲームUI（開始後に表示） ===== -->
+  <!-- 答えプレビュー専用画面（PNGのみ） -->
+  <div id="answerScreen" class="screen hidden" aria-live="polite">
+    <div id="answerWrap">
+      <img id="answerImg" alt="答えプレビュー" />
+      <div id="answerCaption">1秒後に自動的に開始します…</div>
+    </div>
+  </div>
+
+  <!-- ゲームUI -->
   <div id="ui" class="hidden">
     名前：<input id="player" type="text" />
     <label>モード：</label>
