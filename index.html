@@ -17,12 +17,10 @@
       padding:8px 10px;border-bottom:1px solid #e5e7eb;
       display:flex;flex-wrap:wrap;gap:8px;align-items:center
     }
-    #ui input, #ui select, #ui button, #ui label{
-      padding:6px 8px;border-radius:8px;background:#fff
+    #ui input, #ui button, #ui label{
+      padding:6px 8px;border-radius:8px;background:#fff;border:1px solid #cbd5e1
     }
-    #ui input, #ui select, #ui button{
-      border:1px solid #cbd5e1;
-    }
+    #ui label{ border:none; background:transparent; padding:0 4px }
     #timer{font-weight:700;margin-left:4px}
 
     /* キャンバス */
@@ -58,51 +56,65 @@
       .mobile-controls{ display:flex; padding-bottom:max(12px, env(safe-area-inset-bottom)); }
     }
 
-    /* ===== 開始画面（フルスクリーン） ===== */
-    #startScreen{
+    /* ===== フルスクリーン画面（開始/プライミング） ===== */
+    .screen{
       position:fixed; inset:0; z-index:100;
       display:flex; align-items:center; justify-content:center;
       background:linear-gradient(180deg, #f8fafc, #eef2f7);
       padding:24px;
     }
-    .start-card{
+    .card{
       width:min(720px,92vw);
       background:#fff; border:1px solid #e5e7eb; border-radius:20px;
       box-shadow:0 10px 30px rgba(0,0,0,.06);
-      padding:28px 24px;
-      text-align:center;
+      padding:28px 24px; text-align:center;
     }
-    .start-title{ font-size:clamp(22px,5vw,40px); font-weight:800; margin:4px 0 18px }
-    .start-row{ display:flex; gap:12px; justify-content:center; align-items:center; flex-wrap:wrap; margin:10px 0 6px }
-    .start-row input[type="text"]{
+    .title{ font-size:clamp(22px,5vw,40px); font-weight:800; margin:4px 0 18px }
+    .row{ display:flex; gap:12px; justify-content:center; align-items:center; flex-wrap:wrap; margin:10px 0 6px }
+    .row input[type="text"]{
       width:min(320px,70vw); padding:10px 12px; font-size:16px;
       border:1px solid #cbd5e1; border-radius:10px;
     }
-    .start-actions{ margin-top:18px }
-    #startGo{
+    .actions{ margin-top:18px }
+    .primary{
       font-size:18px; font-weight:800; padding:12px 22px; border-radius:12px;
       border:1px solid #0ea5e9; background:#0284c7; color:#fff;
     }
-    #startGo:disabled{ opacity:.45; filter:grayscale(15%); }
+    .primary:disabled{ opacity:.45; filter:grayscale(15%); }
   </style>
 </head>
 <body>
 
   <!-- ===== 開始画面 ===== -->
-  <div id="startScreen">
-    <div class="start-card">
-      <div class="start-title">タングラムパズル</div>
-      <div class="start-row">
+  <div id="startScreen" class="screen">
+    <div class="card">
+      <div class="title">タングラムパズル</div>
+      <div class="row">
         <label>回答者の名前：</label>
         <input id="playerEntry" type="text" placeholder="お名前" />
       </div>
-      <div class="start-row" style="margin-top:6px;">
+      <div class="row" style="margin-top:6px;">
         <strong>モード：</strong>
         <label><input type="radio" name="patternEntry" id="patternAEntry" value="A" checked> A（通常5 + フラッシュ5）</label>
         <label style="opacity:.5"><input type="radio" name="patternEntry" id="patternBEntry" value="B" disabled> B（後日）</label>
       </div>
-      <div class="start-actions">
-        <button id="startGo" disabled>開始</button>
+      <div class="actions">
+        <button id="startGo" class="primary" disabled>開始</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== 中間：プライミングありver 画面 ===== -->
+  <div id="primeScreen" class="screen hidden">
+    <div class="card">
+      <div class="title">プライミングあり ver</div>
+      <p style="margin:8px 0 14px; line-height:1.6">
+        これからの5問は、<br>
+        <strong>開始直後に「正解シルエット」を1秒だけ表示</strong>します。<br>
+        準備ができたら「開始」を押してください。
+      </p>
+      <div class="actions">
+        <button id="primeGo" class="primary">開始</button>
       </div>
     </div>
   </div>
@@ -111,21 +123,13 @@
   <div id="ui" class="hidden">
     名前：<input id="player" type="text" />
     <label>モード：</label>
-    <label style="background:transparent; padding:0 4px;">
-      <input type="radio" name="pattern" id="patternA" value="A" checked>
-      A（通常5 + フラッシュ5）
-    </label>
-    <label style="background:transparent; padding:0 4px; opacity:.5;">
-      <input type="radio" name="pattern" id="patternB" value="B" disabled>
-      B（後日）
-    </label>
+    <label><input type="radio" name="pattern" id="patternA" value="A" checked> A（通常5 + フラッシュ5）</label>
+    <label style="opacity:.5"><input type="radio" name="pattern" id="patternB" value="B" disabled> B（後日）</label>
 
     <button id="start">開始</button>
     <button id="judge">判定</button>
 
-    <!-- デバッグ用セレクト（任意） -->
-    <label>課題：</label>
-    <select id="puzzleSelect"></select>
+    <!-- ※課題セレクトは削除（固定順）。現在の課題名のみ表示 -->
     <span> / 現在：<strong id="puzzleTitle">—</strong></span>
 
     <div id="timer">00:00</div>
