@@ -1,6 +1,7 @@
 // Tangram AB – パターンA: A(通常)→B(フラッシュ) / パターンB: B(通常)→A(フラッシュ)
 // スマホでの 3,2,1 & 解答フラッシュ確実表示、開始フォールバック、localStorage耐性
-// ★ PCでスクロールなし＋キャンバス内描画を上に寄せる（CANVAS_Y_OFFSET）
+// PCスクロール無効＋キャンバス内描画を上に寄せ（CANVAS_Y_OFFSET）
+// ★ 修正点：judge() で ctxX に translate をかけない（誤検知対策）
 
 document.addEventListener('DOMContentLoaded', () => {
   const WORLD_W=1500, WORLD_H=900, SNAP=25;
@@ -204,7 +205,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('keydown',e=>{ if(e.altKey&&(e.key==='s'||e.key==='S')) saveAnswer(); });
   }
 
-  // 判定（★オフスクリーンにも平行移動を適用）
+  // ===== 判定（★ctxXにはtranslateしない）=====
   function judge(){
     const tol=3;
     const {ACTIVE}=currentSets();
@@ -217,36 +218,44 @@ document.addEventListener('DOMContentLoaded', () => {
     ctxUd.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
 
-    // ★ ここから全オフスクリーンで同じ平行移動を適用
-    [ctxT, ctxU, ctxUd, ctxX].forEach(k=>{ k.save(); k.translate(0, CANVAS_Y_OFFSET); });
+    // ★ T/U/Ud は “上オフセット” を適用して描画する
+    [ctxT, ctxU, ctxUd].forEach(k=>{ k.save(); k.translate(0, CANVAS_Y_OFFSET); });
 
-    // ターゲット & ユニオン
+    // ターゲット & ユニオン描画
     drawDil(ctxT, tgt, tol);
     polys.forEach(pl=>drawDil(ctxU,  pl, 0));
     polys.forEach(pl=>drawDil(ctxUd, pl, tol));
 
-    // outside = U - T
+    // T/U/Ud の変換を解除（ビットマップはオフセット込みで固定）
+    [ctxT, ctxU, ctxUd].forEach(k=>k.restore());
+
+    // ===== outside = U - T（ctxX は translate しない）=====
+    ctxX.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.drawImage(cU,0,0);
     ctxX.globalCompositeOperation='destination-out';
     ctxX.drawImage(cT,0,0);
     ctxX.globalCompositeOperation='source-over';
     const outside = alphaCount(ctxX,WORLD_W,WORLD_H);
 
-    // gaps = T - U_dilated
+    // ===== gaps = T - U_dilated =====
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
-    drawDil(ctxX, tgt, 0);
+    ctxX.drawImage(cT,0,0);
     ctxX.globalCompositeOperation='destination-out';
     ctxX.drawImage(cUd,0,0);
     ctxX.globalCompositeOperation='source-over';
     const gaps = alphaCount(ctxX,WORLD_W,WORLD_H);
 
-    // overlaps = sum(piece) - union(U)
+    // ===== overlaps = sum(piece) - union(U) =====
     const unionArea = alphaCount(ctxU,WORLD_W,WORLD_H);
-    let sum=0; for(const pl of polys){ ctxX.clearRect(0,0,WORLD_W,WORLD_H); drawDil(ctxX,pl,0); sum+=alphaCount(ctxX,WORLD_W,WORLD_H); }
+    let sum=0;
+    for(const pl of polys){
+      // ★ ピースを ctxX に描くときだけ Y にオフセットを加えて整合
+      const plOff = pl.map(([x,y])=>[x, y + CANVAS_Y_OFFSET]);
+      ctxX.clearRect(0,0,WORLD_W,WORLD_H);
+      drawDil(ctxX, plOff, 0);
+      sum += alphaCount(ctxX,WORLD_W,WORLD_H);
+    }
     const overlap = Math.max(0, sum - unionArea);
-
-    // ★ 平行移動を解除
-    [ctxT, ctxU, ctxUd, ctxX].forEach(k=>k.restore());
 
     const OUT_TOL=2000, AREA_TOL=4000;
     if(outside>OUT_TOL) return {ok:false,reason:'枠外に出ています。'};
