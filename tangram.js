@@ -1,12 +1,15 @@
 // Tangram AB – パターンA: A(通常)→B(フラッシュ) / パターンB: B(通常)→A(フラッシュ)
 // スマホでの 3,2,1 & 解答フラッシュ確実表示、開始フォールバック、localStorage耐性
 // PCスクロール無効＋キャンバス内描画を上に寄せ（CANVAS_Y_OFFSET）
-// ★ 修正点：judge() で ctxX に translate をかけない（誤検知対策）
+// ★ 隙間誤検知対策：DPR連動の膨張、角の丸め、面積ベースの許容量、ctxXはtranslateしない
 
 document.addEventListener('DOMContentLoaded', () => {
   const WORLD_W=1500, WORLD_H=900, SNAP=25;
   const CANVAS_Y_OFFSET = -60; // ★画面内の描画を上に寄せる（-で上、+で下）
   const COUNT_STEP_MS=700, FLASH_MS=1000;
+
+  // DPRに応じて判定の膨張量を増やす
+  const DILATE_PX = Math.max(4, Math.round(window.devicePixelRatio * 2));
 
   // ===== 目標形（A/B） =====
   const PUZZLES_A = [
@@ -74,7 +77,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const mk=()=>{const c=document.createElement('canvas');c.width=WORLD_W;c.height=WORLD_H;const k=c.getContext('2d',{willReadFrequently:true});k.imageSmoothingEnabled=false;return[c,k];}
   const [cT,ctxT]=mk(),[cU,ctxU]=mk(),[cUd,ctxUd]=mk(),[tmp,ctxX]=mk();
   const alphaCount=(k,w,h)=>{const d=k.getImageData(0,0,w,h).data;let c=0;for(let i=3;i<d.length;i+=4){if(d[i]!==0)c++;}return c;}
-  function drawDil(k,pts,px){drawPath(k,pts);k.fillStyle='#000';k.fill();if(px>0){k.lineWidth=px*2;k.lineJoin='miter';k.miterLimit=8;k.strokeStyle='#000';k.stroke();}}
+
+  // 隙間吸収用の「膨張」描画（角を丸める）
+  function drawDil(k, pts, px){
+    drawPath(k, pts);
+    k.fillStyle = '#000';
+    k.fill();
+    if (px > 0) {
+      k.lineWidth = px * 2 + 1;
+      k.lineJoin  = 'round';
+      k.lineCap   = 'round';
+      k.miterLimit= 2;
+      k.strokeStyle = '#000';
+      k.stroke();
+    }
+  }
 
   // ===== パターン切替 =====
   function currentSets(){
@@ -148,7 +165,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const id=drag.id; drag.active=false; drag.id=null; drag.last=[0,0];
     const {ACTIVE}=currentSets();
     const me=state.pieces.find(p=>p.id===id);
-    const myPts=transform(me.shape,me.offset,me.angle,me.flipped);
+    const myPts=transform(me.shape,me.offset,me.angle,myFlip=me.flipped);
     const targetPts=ACTIVE[state.puzzleIndex].target;
     const others=state.pieces.filter(p=>p.id!==id).flatMap(p=>transform(p.shape,p.offset,p.angle,p.flipped));
     const snaps=[...targetPts,...others]; let best=null,bestD2=SNAP*SNAP;
@@ -205,9 +222,8 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('keydown',e=>{ if(e.altKey&&(e.key==='s'||e.key==='S')) saveAnswer(); });
   }
 
-  // ===== 判定（★ctxXにはtranslateしない）=====
+  // ===== 判定（DPR耐性＋二重オフセット回避）=====
   function judge(){
-    const tol=3;
     const {ACTIVE}=currentSets();
     const tgt=roundPts(ACTIVE[state.puzzleIndex].target);
     const polys=state.pieces.map(p=> roundPts(transform(p.shape,p.offset,p.angle,p.flipped)) );
@@ -218,18 +234,28 @@ document.addEventListener('DOMContentLoaded', () => {
     ctxUd.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
 
-    // ★ T/U/Ud は “上オフセット” を適用して描画する
+    // ---- T/U/Ud は “上オフセット” を適用して描画
     [ctxT, ctxU, ctxUd].forEach(k=>{ k.save(); k.translate(0, CANVAS_Y_OFFSET); });
 
-    // ターゲット & ユニオン描画
-    drawDil(ctxT, tgt, tol);
-    polys.forEach(pl=>drawDil(ctxU,  pl, 0));
-    polys.forEach(pl=>drawDil(ctxUd, pl, tol));
+    // DPRに応じた膨張量
+    const px = DILATE_PX;
+    const tolTarget = Math.max(3, px);
+    const tolPiece  = Math.max(3, px);
 
-    // T/U/Ud の変換を解除（ビットマップはオフセット込みで固定）
+    // ターゲット / ピース
+    drawDil(ctxT, tgt, tolTarget);
+    polys.forEach(pl=>drawDil(ctxU,  pl, 0));
+    polys.forEach(pl=>drawDil(ctxUd, pl, tolPiece));
+
+    // 解除（ビットマップはオフセット込み）
     [ctxT, ctxU, ctxUd].forEach(k=>k.restore());
 
-    // ===== outside = U - T（ctxX は translate しない）=====
+    // しきい値を面積ベースで自動化（ターゲット面積の0.35%）
+    const targetArea = alphaCount(ctxT, WORLD_W, WORLD_H);
+    const AREA_TOL   = Math.max(5000, Math.round(targetArea * 0.0035));
+    const OUT_TOL    = Math.round(AREA_TOL * 0.5);
+
+    // ---- outside = U - T（ctxX は translate しない）
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.drawImage(cU,0,0);
     ctxX.globalCompositeOperation='destination-out';
@@ -237,7 +263,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ctxX.globalCompositeOperation='source-over';
     const outside = alphaCount(ctxX,WORLD_W,WORLD_H);
 
-    // ===== gaps = T - U_dilated =====
+    // ---- gaps = T - U_dilated
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.drawImage(cT,0,0);
     ctxX.globalCompositeOperation='destination-out';
@@ -245,19 +271,17 @@ document.addEventListener('DOMContentLoaded', () => {
     ctxX.globalCompositeOperation='source-over';
     const gaps = alphaCount(ctxX,WORLD_W,WORLD_H);
 
-    // ===== overlaps = sum(piece) - union(U) =====
+    // ---- overlaps = sum(piece) - union(U)
     const unionArea = alphaCount(ctxU,WORLD_W,WORLD_H);
     let sum=0;
     for(const pl of polys){
-      // ★ ピースを ctxX に描くときだけ Y にオフセットを加えて整合
-      const plOff = pl.map(([x,y])=>[x, y + CANVAS_Y_OFFSET]);
+      const plOff = pl.map(([x,y])=>[x, y + CANVAS_Y_OFFSET]); // ctxXに描く時だけY補正
       ctxX.clearRect(0,0,WORLD_W,WORLD_H);
       drawDil(ctxX, plOff, 0);
       sum += alphaCount(ctxX,WORLD_W,WORLD_H);
     }
     const overlap = Math.max(0, sum - unionArea);
 
-    const OUT_TOL=2000, AREA_TOL=4000;
     if(outside>OUT_TOL) return {ok:false,reason:'枠外に出ています。'};
     if(overlap>AREA_TOL) return {ok:false,reason:'ピースが重なっています。'};
     if(gaps>AREA_TOL)    return {ok:false,reason:'隙間があります。'};
@@ -296,7 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 開始/プライム（グローバル公開：HTMLの onclick フォールバックで呼べる）
+  // 開始/プライム（HTMLの onclick フォールバックからも呼べる）
   window.__startGo = function(){
     const name=(playerEntry?.value||'').trim();
     if(!name){ alert('お名前を入力してください'); playerEntry?.focus(); return; }
