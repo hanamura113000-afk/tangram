@@ -19,29 +19,43 @@
     #timer{font-weight:700; margin-left:4px}
 
     .stage{padding:10px}
-    canvas{ display:block; width:100%; height:auto; aspect-ratio:1500/900;
-      background:#ffffff; border-radius:14px; box-shadow:0 2px 8px rgba(0,0,0,.06); touch-action:none }
-
+    canvas{
+      display:block; width:100%; height:auto; aspect-ratio:1500/900;
+      background:#ffffff; border-radius:14px; box-shadow:0 2px 8px rgba(0,0,0,.06);
+      touch-action:none
+    }
     @media (orientation:portrait) and (pointer:coarse){
       #ui{ padding:6px 8px; gap:6px }
       .stage{ padding:4px 0 }
       canvas{ width:100vw; height:auto; aspect-ratio:1500/900 }
     }
 
-    .mobile-controls{ position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
-      display:none; gap:12px; z-index:50; padding:8px 12px; border-radius:14px;
-      background:rgba(0,0,0,.35); backdrop-filter:blur(8px) }
-    .mobile-controls button{ font-size:16px; font-weight:700; padding:12px 16px; border-radius:12px;
-      border:1px solid rgba(255,255,255,.25); color:#fff; background:#0b1220; touch-action:manipulation }
+    .mobile-controls{
+      position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
+      display:none; gap:12px; z-index:50;
+      padding:8px 12px; border-radius:14px; background:rgba(0,0,0,.35); backdrop-filter:blur(8px)
+    }
+    .mobile-controls button{
+      font-size:16px; font-weight:700; padding:12px 16px; border-radius:12px;
+      border:1px solid rgba(255,255,255,.25); color:#fff; background:#0b1220; touch-action:manipulation
+    }
     .mobile-controls button:active{ transform:translateY(1px) }
     @media (orientation:portrait) and (pointer:coarse){
       .mobile-controls{ display:flex; padding-bottom:max(12px, env(safe-area-inset-bottom)) }
     }
 
-    .screen{ position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
-      background:linear-gradient(180deg, #f8fafc, #eef2f7); padding:24px; z-index:9999; will-change:contents }
-    .card{ width:min(720px,92vw); background:#fff; border:1px solid #e5e7eb; border-radius:20px;
-      box-shadow:0 10px 30px rgba(0,0,0,.06); padding:28px 24px; text-align:center }
+    .screen{
+      position:fixed; inset:0;
+      display:flex; align-items:center; justify-content:center;
+      background:linear-gradient(180deg, #f8fafc, #eef2f7);
+      padding:24px; z-index:9999; will-change:contents
+    }
+    .card{
+      width:min(720px,92vw);
+      background:#fff; border:1px solid #e5e7eb; border-radius:20px;
+      box-shadow:0 10px 30px rgba(0,0,0,.06);
+      padding:28px 24px; text-align:center;
+    }
     .title{ font-size:clamp(22px,5vw,40px); font-weight:800; margin:4px 0 18px }
     .row{ display:flex; gap:12px; justify-content:center; align-items:center; flex-wrap:wrap; margin:10px 0 6px }
     .row input[type="text"]{ width:min(320px,70vw); padding:10px 12px; font-size:16px; border:1px solid #cbd5e1; border-radius:10px }
@@ -49,11 +63,17 @@
     .primary{ font-size:18px; font-weight:800; padding:12px 22px; border-radius:12px; border:1px solid #0ea5e9; background:#0284c7; color:#fff }
 
     #countScreen{ background:#0b1020; color:#e5e7eb }
-    #countdown{ font-weight:900; font-variation-settings:"wght" 900;
-      font-size:min(18vw, 140px); line-height:1; letter-spacing:.02em; color:#fff; text-shadow:0 6px 24px rgba(0,0,0,.45); user-select:none }
+    #countdown{
+      font-weight:900; font-variation-settings:"wght" 900;
+      font-size:min(18vw, 140px); line-height:1; letter-spacing:.02em;
+      color:#ffffff; text-shadow:0 6px 24px rgba(0,0,0,.45); user-select:none
+    }
 
-    #adminBadge{ position:fixed; right:10px; bottom:10px; z-index:60; background:#0ea5e9; color:#fff;
-      border-radius:999px; padding:6px 10px; font-size:12px; box-shadow:0 4px 12px rgba(2,132,199,.35) }
+    #adminBadge{
+      position:fixed; right:10px; bottom:10px; z-index:60;
+      background:#0ea5e9; color:#fff; border-radius:999px; padding:6px 10px;
+      font-size:12px; box-shadow:0 4px 12px rgba(2,132,199,.35)
+    }
   </style>
 </head>
 <body>
@@ -69,11 +89,11 @@
       </div>
       <div class="row" style="margin-top:6px;">
         <strong>モード：</strong>
-        <label><input type="radio" name="patternEntry" id="patternAEntry" value="A" checked> A（通常5 + フラッシュ5）</label>
-        <label style="opacity:.5"><input type="radio" name="patternEntry" id="patternBEntry" value="B" disabled> B（後日）</label>
+        <label><input type="radio" name="patternEntry" id="patternAEntry" value="A" checked> A（A通常5 → Bフラッシュ5）</label>
+        <label><input type="radio" name="patternEntry" id="patternBEntry" value="B"> B（B通常5 → Aフラッシュ5）</label>
       </div>
       <div class="actions">
-        <!-- ★ クリックフォールバック：JSが壊れても起動させる -->
+        <!-- フォールバック：JSが壊れても起動 -->
         <button id="startGo" class="primary" onclick="window.__startGo && window.__startGo()">開始</button>
       </div>
     </div>
@@ -89,13 +109,12 @@
         準備ができたら「開始」を押してください。
       </p>
       <div class="actions">
-        <!-- ★ こちらもフォールバック -->
         <button id="primeGo" class="primary" onclick="window.__primeGo && window.__primeGo()">開始</button>
       </div>
     </div>
   </div>
 
-  <!-- カウントダウン画面 -->
+  <!-- カウントダウン -->
   <div id="countScreen" class="screen hidden" aria-live="polite">
     <div id="countdown">3</div>
   </div>
@@ -104,8 +123,8 @@
   <div id="ui" class="hidden">
     名前：<input id="player" type="text" />
     <label>モード：</label>
-    <label><input type="radio" name="pattern" id="patternA" value="A" checked> A（通常5 + フラッシュ5）</label>
-    <label style="opacity:.5"><input type="radio" name="pattern" id="patternB" value="B" disabled> B（後日）</label>
+    <label><input type="radio" name="pattern" id="patternA" value="A" checked> A</label>
+    <label><input type="radio" name="pattern" id="patternB" value="B"> B</label>
 
     <button id="start">開始</button>
     <button id="judge">判定</button>
@@ -114,13 +133,16 @@
     <div id="timer">00:00</div>
     <span style="margin-left:10px;color:#6b7280;">ショートカット：回転 R / 反転 F</span>
 
+    <!-- 管理者のみ -->
     <button id="saveLayoutBtn" class="hidden">このレイアウトを正解として保存（Alt+S）</button>
+    <!-- （任意）エクスポート/インポートを導入している場合はここにボタンを追加 -->
   </div>
 
   <div class="stage hidden" id="stageWrap">
     <canvas id="game" width="1500" height="900"></canvas>
   </div>
 
+  <!-- スマホ用操作 -->
   <div class="mobile-controls hidden" id="mobileControls" aria-label="モバイル操作">
     <button id="rotateMobile" type="button">回転 (R)</button>
     <button id="flipMobile"  type="button">反転 (F)</button>
