@@ -1,8 +1,8 @@
 // Tangram – 正解レイアウトを一瞬だけ表示（画像不使用） + 管理者保存 + スマホどこでもドラッグ
-// ★レイアウトをピースIDごとに保存/復元（順序ズレ問題の修正）
+// 開始ボタンの有効化をIME/オートフィル対応に強化。レイアウトはIDキーで保存/復元。
 
 document.addEventListener('DOMContentLoaded', () => {
-  const APP_VERSION  = 'tangramAB-2.0.0';
+  const APP_VERSION  = 'tangramAB-2.1.0';
   const WORLD_W=1500, WORLD_H=900, SNAP_DISTANCE=25;
 
   // ---- 前半5問（プレビューなし）----
@@ -37,8 +37,8 @@ document.addEventListener('DOMContentLoaded', () => {
     ...new Array(PUZZLES_A.length).fill(false),
     ...new Array(PUZZLES_B2.length).fill(true)
   ];
-  const COUNT_STEP_MS = 700;
-  const FLASH_MS      = 1000;
+  const COUNT_STEP_MS = 700;  // 3→2→1
+  const FLASH_MS      = 1000; // 見せる時間
 
   // DOM
   const $id = id => document.getElementById(id);
@@ -78,14 +78,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const ACTIVE_PUZZLES = PUZZLES_A.concat(PUZZLES_B2);
 
   // ===== レイアウト保存（IDキー） =====
-  // 保存形式：{ [title]: { byId: { '0':{offset:[x,y],angle:..,flipped:true}, ... }, v:1 } }
+  // 形式：{ [title]: { v:1, byId: { '0':{offset:[x,y],angle,flipped}, ... } } }
   const LKEY='tangramLayouts_v1';
   const loadLayouts = () => { try{ return JSON.parse(localStorage.getItem(LKEY)||'{}'); }catch(_){ return {}; } };
   const saveLayouts = obj => localStorage.setItem(LKEY, JSON.stringify(obj));
   const getLayout = title => (loadLayouts()[title] || null);
-  function setLayout(title, layoutById){
+  function setLayout(title, byId){
     const all = loadLayouts();
-    all[title] = { v:1, byId: layoutById };
+    all[title] = { v:1, byId };
     saveLayouts(all);
   }
 
@@ -144,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   requestAnimationFrame(render);
 
-  // Hit & drag (play only, not during flash)
+  // Hit & drag
   function hitTest(x,y){
     for(let i=state.pieces.length-1;i>=0;i--){
       const p=state.pieces[i], world=transform(p.shape,p.offset,p.angle,p.flipped);
@@ -220,7 +220,6 @@ document.addEventListener('DOMContentLoaded', () => {
     state.frozen = true;
     const backup = copyPieces(state.pieces);
 
-    // ★IDで適用
     const byId = layoutObj.byId;
     state.pieces = state.pieces.map(p=>{
       const rec = byId[String(p.id)];
@@ -265,12 +264,14 @@ document.addEventListener('DOMContentLoaded', () => {
     polys.forEach(poly => drawDilated(ctxU,  poly, 0));
     polys.forEach(poly => drawDilated(ctxUd, poly, tol));
 
+    // outside = U - T
     ctxX.drawImage(offU,0,0);
     ctxX.globalCompositeOperation='destination-out';
     ctxX.drawImage(offT,0,0);
     ctxX.globalCompositeOperation='source-over';
     const outside = alphaCount(ctxX,WORLD_W,WORLD_H);
 
+    // gaps = T - U_dilated
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
     drawDilated(ctxX, tgt, 0);
     ctxX.globalCompositeOperation='destination-out';
@@ -278,6 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ctxX.globalCompositeOperation='source-over';
     const gaps = alphaCount(ctxX,WORLD_W,WORLD_H);
 
+    // overlaps = sum(piece) - union(U)
     const unionArea = alphaCount(ctxU,WORLD_W,WORLD_H);
     let sum=0; for(const poly of polys){ ctxX.clearRect(0,0,WORLD_W,WORLD_H); drawDilated(ctxX, poly, 0); sum+=alphaCount(ctxX,WORLD_W,WORLD_H); }
     const overlap = Math.max(0, sum - unionArea);
@@ -289,7 +291,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return {ok:true};
   }
 
-  // Buttons
+  // 進行ボタン
   $id('start')?.addEventListener('click', () => { if(state.step==='home') startFirstHalf(); });
   $id('judge')?.addEventListener('click', onJudge);
 
@@ -302,7 +304,6 @@ document.addEventListener('DOMContentLoaded', () => {
     setPuzzleTitle(); resetPieces(); resetTimer();
     flashSolutionThen(()=>{ startTimer(); });
   }
-
   function onJudge(){
     const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
     stopTimer();
@@ -328,26 +329,40 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Init
-  let startAt=0;
-  function resetTimer(){ if(state.timerId){clearInterval(state.timerId)}; state.timerId=null; state.elapsed=0; if(timerEl) timerEl.textContent='00:00'; }
-  function startTimer(){ if(state.timerId){clearInterval(state.timerId)}; startAt=Date.now(); state.timerId=setInterval(()=>{ state.elapsed=Math.floor((Date.now()-startAt)/1000); if(timerEl) timerEl.textContent=fmtTime(state.elapsed); },500); }
-
-  function bootstrapUI(){
-    uiToolbar.classList.add('hidden'); stageWrap.classList.add('hidden'); mobileCtrls.classList.add('hidden');
-    playerEntry.addEventListener('input', () => { startGo.disabled = !playerEntry.value.trim(); });
-    startGo.addEventListener('click', () => {
-      playerInput.value = playerEntry.value.trim();
-      if (patternAEntry.checked) patternA.checked = true;
-      startScreen.classList.add('hidden');
-      uiToolbar.classList.remove('hidden'); stageWrap.classList.remove('hidden'); mobileCtrls.classList.remove('hidden');
-      startFirstHalf();
-    });
-    primeGo.addEventListener('click', () => {
-      primeScreen.classList.add('hidden');
-      startSecondHalf();
-    });
+  // ===== 開始画面：有効化ロジック（IME/オートフィル対応） =====
+  function updateStartEnabled() {
+    const ok = playerEntry && playerEntry.value.trim().length > 0;
+    if (startGo) startGo.disabled = !ok;
   }
+  ['input','change','keyup','compositionend','blur'].forEach(ev => {
+    playerEntry?.addEventListener(ev, updateStartEnabled);
+  });
+  updateStartEnabled();
 
-  setPuzzleTitle(); resetPieces(); if(timerEl) timerEl.textContent='00:00'; bootstrapUI();
+  startGo?.addEventListener('click', (e) => {
+    const name = (playerEntry?.value || '').trim();
+    if (!name) { e.preventDefault(); playerEntry?.focus(); return; }
+    playerInput.value = name;
+    if (patternAEntry?.checked) patternA.checked = true;
+
+    // 画面遷移
+    startScreen.classList.add('hidden');
+    uiToolbar.classList.remove('hidden');
+    stageWrap.classList.remove('hidden');
+    mobileCtrls.classList.remove('hidden');
+
+    // ゲーム開始
+    startFirstHalf();
+  });
+
+  // 中間画面 → 後半開始
+  primeGo.addEventListener('click', () => {
+    primeScreen.classList.add('hidden');
+    startSecondHalf();
+  });
+
+  // 初期表示
+  uiToolbar.classList.add('hidden'); stageWrap.classList.add('hidden'); mobileCtrls.classList.add('hidden');
+  if (timerEl) timerEl.textContent = '00:00';
+  setPuzzleTitle(); resetPieces();
 });
