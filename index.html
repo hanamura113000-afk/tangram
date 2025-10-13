@@ -51,7 +51,7 @@
       .mobile-controls{ display:flex; padding-bottom:max(12px, env(safe-area-inset-bottom)); }
     }
 
-    /* ===== フルスクリーン画面（開始/プライミング/答えプレビュー） ===== */
+    /* ===== フルスクリーン画面（開始/プライミング/カウントダウン） ===== */
     .screen{
       position:fixed; inset:0; z-index:100;
       display:flex; align-items:center; justify-content:center;
@@ -77,22 +77,21 @@
     }
     .primary:disabled{ opacity:.45; filter:grayscale(15%); }
 
-    /* 答えプレビュー（PNGのみ + カウントダウン） */
-    #answerScreen{ background:#0b1020; color:#e5e7eb; }
-    #answerWrap{ display:flex; flex-direction:column; align-items:center; gap:10px; }
+    /* カウントダウン専用画面（正解レイアウトの直前に出す） */
+    #countScreen{ background:#0b1020; color:#e5e7eb; }
     #countdown{
       font-weight:900; font-variation-settings:"wght" 900;
       font-size:min(18vw, 140px); line-height:1; letter-spacing:.02em;
       color:#ffffff; text-shadow:0 6px 24px rgba(0,0,0,.45);
       user-select:none;
     }
-    #answerImg{
-      max-width:min(92vw, 1200px);
-      max-height:min(82vh, 820px);
-      width:auto; height:auto; object-fit:contain;
-      image-rendering:auto; border-radius:12px; box-shadow:0 12px 36px rgba(0,0,0,.35);
+
+    /* 管理者モードの控えめバッジ */
+    #adminBadge{
+      position:fixed; right:10px; bottom:10px; z-index:60;
+      background:#0ea5e9; color:#fff; border-radius:999px; padding:6px 10px;
+      font-size:12px; box-shadow:0 4px 12px rgba(2,132,199,.35)
     }
-    #answerCaption{ color:#cbd5e1; font-size:14px }
   </style>
 </head>
 <body>
@@ -122,8 +121,8 @@
       <div class="title">プライミングあり ver</div>
       <p style="margin:8px 0 14px; line-height:1.6">
         これからの5問は、<br>
-        <strong>開始前に「答え画像」だけを表示</strong>します。<br>
-        「開始」を押すとカウントダウンのあと画像が出ます。
+        <strong>開始前に「正解レイアウト」を1秒だけ表示</strong>します。<br>
+        準備ができたら「開始」を押してください。
       </p>
       <div class="actions">
         <button id="primeGo" class="primary">開始</button>
@@ -131,13 +130,9 @@
     </div>
   </div>
 
-  <!-- 答えプレビュー専用画面（PNGのみ + カウントダウン） -->
-  <div id="answerScreen" class="screen hidden" aria-live="polite">
-    <div id="answerWrap">
-      <div id="countdown"></div>
-      <img id="answerImg" alt="答えプレビュー" class="hidden"/>
-      <div id="answerCaption">読み込み中…</div>
-    </div>
+  <!-- カウントダウン画面 -->
+  <div id="countScreen" class="screen hidden" aria-live="polite">
+    <div id="countdown">3</div>
   </div>
 
   <!-- ゲームUI -->
@@ -153,6 +148,9 @@
     <span> / 現在：<strong id="puzzleTitle">—</strong></span>
     <div id="timer">00:00</div>
     <span style="margin-left:10px;color:#6b7280;">ショートカット：回転 R / 反転 F</span>
+
+    <!-- 管理者モード用（?admin=1 の時だけ表示） -->
+    <button id="saveLayoutBtn" class="hidden">このレイアウトを正解として保存（Alt+S）</button>
   </div>
 
   <div class="stage hidden" id="stageWrap">
@@ -164,6 +162,8 @@
     <button id="rotateMobile" type="button">回転 (R)</button>
     <button id="flipMobile"  type="button">反転 (F)</button>
   </div>
+
+  <div id="adminBadge" class="hidden">管理者モード</div>
 
   <script src="./tangram.js" defer></script>
 </body>
