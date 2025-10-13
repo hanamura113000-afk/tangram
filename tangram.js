@@ -33,4 +33,347 @@ document.addEventListener('DOMContentLoaded', () => {
   ];
   const COLORS=["#FF6B6B","#FFD93D","#6BCB77","#4D96FF","#9B59B6","#F39C12","#1ABC9C"];
 
-  //
+  // 後半はフラッシュ、前半はなし
+  const FLASH_FLAGS = [
+    ...new Array(PUZZLES_A.length).fill(false),
+    ...new Array(PUZZLES_B2.length).fill(true)
+  ];
+  const COUNT_STEP_MS = 700;  // 3→2→1 の1ステップ時間
+  const FLASH_MS      = 1000; // 正解レイアウト表示時間（見せる長さ）
+
+  // DOM
+  const $id = id => document.getElementById(id);
+  const startScreen   = $id('startScreen');
+  const playerEntry   = $id('playerEntry');
+  const patternAEntry = $id('patternAEntry');
+  const startGo       = $id('startGo');
+
+  const primeScreen   = $id('primeScreen');
+  const primeGo       = $id('primeGo');
+
+  const countScreen   = $id('countScreen');
+  const countdownEl   = $id('countdown');
+
+  const uiToolbar     = $id('ui');
+  const stageWrap     = $id('stageWrap');
+  const mobileCtrls   = $id('mobileControls');
+
+  const playerInput   = $id('player');
+  const patternA      = $id('patternA');
+  const patternB      = $id('patternB');
+  const puzzleTitle   = $id('puzzleTitle');
+  const timerEl       = $id('timer');
+
+  // 管理者UI
+  const saveLayoutBtn = $id('saveLayoutBtn');
+  const adminBadge    = $id('adminBadge');
+  const ADMIN_MODE = location.search.includes('admin=1');
+
+  if (ADMIN_MODE) {
+    saveLayoutBtn.classList.remove('hidden');
+    adminBadge.classList.remove('hidden');
+  }
+
+  // 状態
+  const state={
+    pieces:[], selectedId:null, puzzleIndex:0,
+    step:'home',
+    results:[], elapsed:0, timerId:null,
+    frozen:false // フラッシュ中の入力無効化
+  };
+
+  // 進行セット（固定順）
+  const ACTIVE_PUZZLES = PUZZLES_A.concat(PUZZLES_B2);
+
+  // 正解レイアウトの保存/読込（localStorage）
+  const LKEY='tangramLayouts_v1';
+  function loadLayouts(){
+    try{ return JSON.parse(localStorage.getItem(LKEY) || '{}'); }
+    catch(_){ return {}; }
+  }
+  function saveLayouts(obj){
+    localStorage.setItem(LKEY, JSON.stringify(obj));
+  }
+  function getLayout(title){
+    const all=loadLayouts(); return all[title] || null;
+  }
+  function setLayout(title, layout){
+    const all=loadLayouts(); all[title]=layout; saveLayouts(all);
+  }
+
+  // ユーティリティ
+  const fmtTime = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
+  const deg = d => d*Math.PI/180;
+  function centroid(pts){let sx=0,sy=0;for(const [x,y] of pts){sx+=x;sy+=y}return [sx/pts.length,sy/pts.length]}
+  function transform(points, offset, angle, flipped){
+    const [cx,cy]=centroid(points); const a=deg(angle); const c=Math.cos(a), s=Math.sin(a);
+    return points.map(([x,y])=>{ let dx=x-cx,dy=y-cy; if(flipped) dx=-dx; const xr=dx*c-dy*s, yr=dx*s+dy*c; return [xr+cx+offset[0], yr+cy+offset[1]];});
+  }
+  function distanceSq(a,b){ const dx=a[0]-b[0], dy=a[1]-b[1]; return dx*dx+dy*dy; }
+  function drawPath(ctx, pts){ ctx.beginPath(); pts.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.closePath(); }
+  function drawPolygon(ctx, pts, fill=null, stroke="#222", lw=2){ if(!pts.length) return; drawPath(ctx, pts); if(fill){ctx.fillStyle=fill; ctx.fill();} if(stroke&&lw){ctx.strokeStyle=stroke; ctx.lineWidth=lw; ctx.stroke();} }
+
+  // キャンバス
+  const canvas=$id('game'); if(!canvas){ alert('canvas #game が見つかりません'); return; }
+  const ctx=canvas.getContext('2d',{willReadFrequently:true});
+  canvas.style.touchAction='none';
+  function resizeCanvas(){ canvas.width=WORLD_W; canvas.height=WORLD_H; }
+  window.addEventListener('resize',resizeCanvas); resizeCanvas();
+
+  // 判定用オフスクリーン
+  const offT=document.createElement('canvas'); offT.width=WORLD_W; offT.height=WORLD_H; const ctxT=offT.getContext('2d',{willReadFrequently:true});
+  const offU=document.createElement('canvas'); offU.width=WORLD_W; offU.height=WORLD_H; const ctxU=offU.getContext('2d',{willReadFrequently:true});
+  const offUd=document.createElement('canvas'); offUd.width=WORLD_W; offUd.height=WORLD_H; const ctxUd=offUd.getContext('2d',{willReadFrequently:true});
+  const tmp=document.createElement('canvas'); tmp.width=WORLD_W; tmp.height=WORLD_H; const ctxX=tmp.getContext('2d',{willReadFrequently:true});
+  ;[ctxT,ctxU,ctxUd,ctxX].forEach(c=>c.imageSmoothingEnabled=false);
+  const roundPts = poly => poly.map(([x,y])=>[Math.round(x),Math.round(y)]);
+  function alphaCount(ctx,w,h){ const d=ctx.getImageData(0,0,w,h).data; let c=0; for(let i=3;i<d.length;i+=4){ if(d[i]!==0) c++; } return c; }
+  function drawDilated(ctx, pts, dilatePx){
+    drawPath(ctx, pts); ctx.fillStyle='#000'; ctx.fill();
+    if(dilatePx>0){ ctx.lineWidth=dilatePx*2; ctx.lineJoin='miter'; ctx.miterLimit=8; ctx.strokeStyle='#000'; ctx.stroke(); }
+  }
+
+  // ピース状態
+  function resetPieces(){
+    state.pieces = TANGRAM_PIECES.map((shape,i)=>({
+      id:i, shape:shape.map(([x,y])=>[x,y]),
+      color:COLORS[i%COLORS.length],
+      offset:[80+i*200,680], angle:0, flipped:false,
+    }));
+    state.selectedId=null;
+  }
+  function copyPieces(pieces){ return pieces.map(p=>({id:p.id, shape:p.shape.map(([x,y])=>[x,y]), color:p.color, offset:[...p.offset], angle:p.angle, flipped:p.flipped})); }
+
+  // 描画ループ
+  function render(){
+    ctx.clearRect(0,0,WORLD_W,WORLD_H);
+    const cur = ACTIVE_PUZZLES[state.puzzleIndex];
+    drawPolygon(ctx, cur.target, '#2b2b2b', '#444', 2);
+
+    const ts=state.pieces.map(p=>({...p,world:transform(p.shape,p.offset,p.angle,p.flipped)}));
+    ts.forEach(p=>{ ctx.save(); ctx.shadowColor='rgba(0,0,0,.22)'; ctx.shadowBlur=8; ctx.shadowOffsetY=4; drawPolygon(ctx,p.world,p.color,'#1a1a1a',2); ctx.restore(); });
+    if(state.selectedId!=null){ const p=ts.find(pp=>pp.id===state.selectedId); if(p){ ctx.save(); ctx.setLineDash([6,4]); drawPolygon(ctx,p.world,null,'#e5e7eb',2); ctx.restore(); } }
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render);
+
+  // ヒットテスト
+  function hitTest(x,y){
+    for(let i=state.pieces.length-1;i>=0;i--){
+      const p=state.pieces[i], world=transform(p.shape,p.offset,p.angle,p.flipped);
+      drawPath(ctx,world); if(ctx.isPointInPath(x,y)) return p.id;
+    }
+    return null;
+  }
+  const drag={active:false,id:null,last:[0,0]};
+  function canvasXY(e){ const r=canvas.getBoundingClientRect(); const sx=canvas.width/r.width, sy=canvas.height/r.height; return [(e.clientX-r.left)*sx,(e.clientY-r.top)*sy]; }
+
+  // 入力（プレイ中のみ、フラッシュ中は無効）
+  canvas.addEventListener('pointerdown',e=>{
+    if(state.step!=='play' || state.frozen) return; e.preventDefault(); canvas.setPointerCapture(e.pointerId);
+    const [x,y]=canvasXY(e);
+    const id=hitTest(x,y);
+    let moveId = id!=null ? id : state.selectedId;   // ピース外でも選択中を動かす
+    if(moveId!=null){
+      drag.active=true; drag.id=moveId; drag.last=[x,y];
+      if(id!=null){ // 新しく触ったピースを選択＆最前面へ
+        state.selectedId=id;
+        const idx=state.pieces.findIndex(p=>p.id===id); const [pk]=state.pieces.splice(idx,1); state.pieces.push(pk);
+      }
+    }
+  },{passive:false});
+  canvas.addEventListener('pointermove',e=>{
+    if(!drag.active || state.frozen) return; e.preventDefault();
+    const [x,y]=canvasXY(e); const dx=x-drag.last[0], dy=y-drag.last[1]; drag.last=[x,y];
+    const id=drag.id; state.pieces=state.pieces.map(p=>p.id===id?{...p,offset:[p.offset[0]+dx,p.offset[1]+dy]}:p);
+  },{passive:false});
+  canvas.addEventListener('pointerup',e=>{
+    if(!drag.active) return; e.preventDefault();
+    const id=drag.id; drag.active=false; drag.id=null; drag.last=[0,0];
+
+    // スナップ
+    const me=state.pieces.find(p=>p.id===id);
+    const myPts=transform(me.shape,me.offset,me.angle,me.flipped);
+    const targetPts=ACTIVE_PUZZLES[state.puzzleIndex].target;
+    const others=state.pieces.filter(p=>p.id!==id).flatMap(p=>transform(p.shape,p.offset,p.angle,p.flipped));
+    const snaps=[...targetPts,...others]; let best=null, bestD2=SNAP_DISTANCE*SNAP_DISTANCE;
+    for(const mp of myPts){ for(const tp of snaps){ const d2=distanceSq(mp,tp); if(d2<bestD2){bestD2=d2; best=[tp[0]-mp[0],tp[1]-mp[1]];} } }
+    if(best){ me.offset=[me.offset[0]+best[0], me.offset[1]+best[1]]; }
+  },{passive:false});
+  canvas.addEventListener('pointercancel',()=>{ drag.active=false; drag.id=null; drag.last=[0,0]; },{passive:false});
+
+  // 回転 / 反転
+  function rotateSelected(){ if(state.selectedId==null || state.step!=='play' || state.frozen) return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,angle:(p.angle+45)%360}:p); }
+  function flipSelected(){ if(state.selectedId==null || state.step!=='play' || state.frozen) return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,flipped:!p.flipped}:p); }
+  $id('rotateMobile')?.addEventListener('click', rotateSelected);
+  $id('flipMobile')?.addEventListener('click',  flipSelected);
+  window.addEventListener('keydown',(e)=>{ if(state.step!=='play'||state.selectedId==null||state.frozen) return; if(e.key==='r'||e.key==='R') rotateSelected(); if(e.key==='f'||e.key==='F') flipSelected(); });
+
+  // タイマー
+  let startAt=0;
+  function updateTimer(){ if(timerEl) timerEl.textContent=fmtTime(state.elapsed); }
+  function stopTimer(){ if(state.timerId){ clearInterval(state.timerId); state.timerId=null; } }
+  function resetTimer(){ stopTimer(); state.elapsed=0; updateTimer(); }
+  function startTimer(){ stopTimer(); startAt=Date.now(); state.timerId=setInterval(()=>{ state.elapsed=Math.floor((Date.now()-startAt)/1000); updateTimer(); },500); }
+
+  // タイトル
+  function setPuzzleTitle(){ if(puzzleTitle) puzzleTitle.textContent=ACTIVE_PUZZLES[state.puzzleIndex].title; }
+
+  // ===== カウントダウン → 正解レイアウトを一瞬表示 =====
+  async function countdown3(){
+    countScreen.classList.remove('hidden');
+    countdownEl.textContent='3'; await new Promise(r=>setTimeout(r, COUNT_STEP_MS));
+    countdownEl.textContent='2'; await new Promise(r=>setTimeout(r, COUNT_STEP_MS));
+    countdownEl.textContent='1'; await new Promise(r=>setTimeout(r, COUNT_STEP_MS));
+    countScreen.classList.add('hidden');
+  }
+
+  async function flashSolutionThen(cb){
+    const title = ACTIVE_PUZZLES[state.puzzleIndex].title;
+    const layout = getLayout(title);
+    if(!layout){ cb?.(); return; }        // 正解未登録ならスキップ
+    await countdown3();                   // 3,2,1
+    state.frozen = true;                  // 入力を一時停止
+    const backup = copyPieces(state.pieces);
+
+    // 正解配置に反映
+    if(layout.length === state.pieces.length){
+      state.pieces = state.pieces.map((p,i)=>({
+        ...p,
+        offset:[layout[i].offset[0], layout[i].offset[1]],
+        angle: layout[i].angle,
+        flipped: !!layout[i].flipped
+      }));
+    }
+
+    // 1秒見せる
+    await new Promise(r=>setTimeout(r, FLASH_MS));
+
+    // 元に戻す
+    state.pieces = backup;
+    state.frozen = false;
+    cb?.();
+  }
+
+  // ===== 管理者：現在の並びを「正解レイアウト」として保存 =====
+  function saveCurrentAsAnswer(){
+    const title = ACTIVE_PUZZLES[state.puzzleIndex].title;
+    const layout = state.pieces.map(p=>({ offset:[...p.offset], angle:p.angle, flipped:!!p.flipped }));
+    setLayout(title, layout);
+    alert(`「${title}」の正解レイアウトを保存しました！`);
+  }
+  if (ADMIN_MODE) {
+    saveLayoutBtn.addEventListener('click', saveCurrentAsAnswer);
+    window.addEventListener('keydown', (e)=>{
+      if(e.altKey && (e.key==='s' || e.key==='S')) saveCurrentAsAnswer();
+    });
+  }
+
+  // 判定
+  function judge(){
+    const tol=3;
+    const tgt = roundPts(ACTIVE_PUZZLES[state.puzzleIndex].target);
+    const polys = state.pieces.map(p=> roundPts(transform(p.shape,p.offset,p.angle,p.flipped)));
+
+    ctxT.clearRect(0,0,WORLD_W,WORLD_H);
+    ctxU.clearRect(0,0,WORLD_W,WORLD_H);
+    ctxUd.clearRect(0,0,WORLD_W,WORLD_H);
+    ctxX.clearRect(0,0,WORLD_W,WORLD_H);
+
+    drawDilated(ctxT, tgt, tol);
+    polys.forEach(poly => drawDilated(ctxU,  poly, 0));
+    polys.forEach(poly => drawDilated(ctxUd, poly, tol));
+
+    // outside = U - T_expanded
+    ctxX.drawImage(offU,0,0);
+    ctxX.globalCompositeOperation='destination-out';
+    ctxX.drawImage(offT,0,0);
+    ctxX.globalCompositeOperation='source-over';
+    const outside = alphaCount(ctxX,WORLD_W,WORLD_H);
+
+    // gaps = T - U_expanded
+    ctxX.clearRect(0,0,WORLD_W,WORLD_H);
+    drawDilated(ctxX, tgt, 0);
+    ctxX.globalCompositeOperation='destination-out';
+    ctxX.drawImage(offUd,0,0);
+    ctxX.globalCompositeOperation='source-over';
+    const gaps = alphaCount(ctxX,WORLD_W,WORLD_H);
+
+    // overlaps = sum(piece) - union(U)
+    const unionArea = alphaCount(ctxU,WORLD_W,WORLD_H);
+    let sum=0; for(const poly of polys){ ctxX.clearRect(0,0,WORLD_W,WORLD_H); drawDilated(ctxX, poly, 0); sum+=alphaCount(ctxX,WORLD_W,WORLD_H); }
+    const overlap = Math.max(0, sum - unionArea);
+
+    const OUT_TOL=2000, AREA_TOL=4000;
+    if(outside>OUT_TOL) return {ok:false,reason:'枠外に出ています。'};
+    if(overlap>AREA_TOL) return {ok:false,reason:'ピースが重なっています。'};
+    if(gaps>AREA_TOL)    return {ok:false,reason:'隙間があります。'};
+    return {ok:true};
+  }
+
+  // ボタン
+  $id('start')?.addEventListener('click', () => { if(state.step==='home') startFirstHalf(); });
+  $id('judge')?.addEventListener('click', onJudge);
+
+  // 前半/後半開始
+  function startFirstHalf(){
+    state.step='play'; state.results=[]; state.puzzleIndex=0;
+    setPuzzleTitle(); resetPieces(); resetTimer(); startTimer();
+  }
+  function startSecondHalf(){
+    state.step='play'; state.puzzleIndex=5;
+    setPuzzleTitle(); resetPieces(); resetTimer();
+    // 正解レイアウト → 計測開始
+    if (FLASH_FLAGS[state.puzzleIndex]) {
+      flashSolutionThen(()=>{ startTimer(); });
+    } else {
+      startTimer();
+    }
+  }
+
+  // 判定→次へ
+  function onJudge(){
+    const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
+    stopTimer();
+    state.results.push({ puzzleIndex: state.puzzleIndex+1, flashed: !!FLASH_FLAGS[state.puzzleIndex], timeSec: state.elapsed });
+
+    if(state.puzzleIndex===4){
+      alert(`CLEAR!\n課題: ${ACTIVE_PUZZLES[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
+      state.step='prime';
+      primeScreen.classList.remove('hidden');
+      return;
+    }
+
+    if(state.puzzleIndex<ACTIVE_PUZZLES.length-1){
+      alert(`CLEAR!\n課題: ${ACTIVE_PUZZLES[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
+      state.puzzleIndex++;
+      setPuzzleTitle(); resetPieces(); resetTimer();
+
+      if(FLASH_FLAGS[state.puzzleIndex]) flashSolutionThen(()=>{ startTimer(); });
+      else                               startTimer();
+    }else{
+      const total=state.results.reduce((a,b)=>a+b.timeSec,0);
+      alert(`10問クリア！合計: ${total} 秒`);
+      state.step='finished';
+    }
+  }
+
+  // 初期セット
+  function updateTimer(){ if(timerEl) timerEl.textContent=fmtTime(state.elapsed); }
+  setPuzzleTitle(); resetPieces(); updateTimer();
+
+  // 初期可視
+  uiToolbar.classList.add('hidden'); stageWrap.classList.add('hidden'); mobileCtrls.classList.add('hidden');
+  playerEntry.addEventListener('input', () => { startGo.disabled = !playerEntry.value.trim(); });
+  startGo.addEventListener('click', () => {
+    playerInput.value = playerEntry.value.trim();
+    if (patternAEntry.checked) patternA.checked = true;
+    startScreen.classList.add('hidden');
+    uiToolbar.classList.remove('hidden'); stageWrap.classList.remove('hidden'); mobileCtrls.classList.remove('hidden');
+    startFirstHalf();
+  });
+  primeGo.addEventListener('click', () => {
+    primeScreen.classList.add('hidden');
+    startSecondHalf();
+  });
+});
