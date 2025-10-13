@@ -1,7 +1,8 @@
 // Tangram – 正解レイアウトを一瞬だけ表示（画像不使用） + 管理者保存 + スマホどこでもドラッグ
+// ★レイアウトをピースIDごとに保存/復元（順序ズレ問題の修正）
 
 document.addEventListener('DOMContentLoaded', () => {
-  const APP_VERSION  = 'tangramAB-1.9.0';
+  const APP_VERSION  = 'tangramAB-2.0.0';
   const WORLD_W=1500, WORLD_H=900, SNAP_DISTANCE=25;
 
   // ---- 前半5問（プレビューなし）----
@@ -21,7 +22,6 @@ document.addEventListener('DOMContentLoaded', () => {
     { title: "魚B",    target: [[482,288],[694,288],[588,182],[694,182],[906,394],[696,606],[588,606],[694,500],[482,500],[588,394]] },
   ];
 
-  // Tangram ピース定義
   const TANGRAM_PIECES = [
     [[0,0],[300,0],[150,150]],
     [[0,0],[0,300],[150,150]],
@@ -33,13 +33,12 @@ document.addEventListener('DOMContentLoaded', () => {
   ];
   const COLORS=["#FF6B6B","#FFD93D","#6BCB77","#4D96FF","#9B59B6","#F39C12","#1ABC9C"];
 
-  // 後半はフラッシュ、前半はなし
   const FLASH_FLAGS = [
     ...new Array(PUZZLES_A.length).fill(false),
     ...new Array(PUZZLES_B2.length).fill(true)
   ];
-  const COUNT_STEP_MS = 700;  // 3→2→1 の1ステップ時間
-  const FLASH_MS      = 1000; // 正解レイアウト表示時間（見せる長さ）
+  const COUNT_STEP_MS = 700;
+  const FLASH_MS      = 1000;
 
   // DOM
   const $id = id => document.getElementById(id);
@@ -64,44 +63,33 @@ document.addEventListener('DOMContentLoaded', () => {
   const puzzleTitle   = $id('puzzleTitle');
   const timerEl       = $id('timer');
 
-  // 管理者UI
   const saveLayoutBtn = $id('saveLayoutBtn');
   const adminBadge    = $id('adminBadge');
   const ADMIN_MODE = location.search.includes('admin=1');
-
-  if (ADMIN_MODE) {
-    saveLayoutBtn.classList.remove('hidden');
-    adminBadge.classList.remove('hidden');
-  }
+  if (ADMIN_MODE) { saveLayoutBtn.classList.remove('hidden'); adminBadge.classList.remove('hidden'); }
 
   // 状態
   const state={
     pieces:[], selectedId:null, puzzleIndex:0,
     step:'home',
     results:[], elapsed:0, timerId:null,
-    frozen:false // フラッシュ中の入力無効化
+    frozen:false
   };
-
-  // 進行セット（固定順）
   const ACTIVE_PUZZLES = PUZZLES_A.concat(PUZZLES_B2);
 
-  // 正解レイアウトの保存/読込（localStorage）
+  // ===== レイアウト保存（IDキー） =====
+  // 保存形式：{ [title]: { byId: { '0':{offset:[x,y],angle:..,flipped:true}, ... }, v:1 } }
   const LKEY='tangramLayouts_v1';
-  function loadLayouts(){
-    try{ return JSON.parse(localStorage.getItem(LKEY) || '{}'); }
-    catch(_){ return {}; }
-  }
-  function saveLayouts(obj){
-    localStorage.setItem(LKEY, JSON.stringify(obj));
-  }
-  function getLayout(title){
-    const all=loadLayouts(); return all[title] || null;
-  }
-  function setLayout(title, layout){
-    const all=loadLayouts(); all[title]=layout; saveLayouts(all);
+  const loadLayouts = () => { try{ return JSON.parse(localStorage.getItem(LKEY)||'{}'); }catch(_){ return {}; } };
+  const saveLayouts = obj => localStorage.setItem(LKEY, JSON.stringify(obj));
+  const getLayout = title => (loadLayouts()[title] || null);
+  function setLayout(title, layoutById){
+    const all = loadLayouts();
+    all[title] = { v:1, byId: layoutById };
+    saveLayouts(all);
   }
 
-  // ユーティリティ
+  // Utils
   const fmtTime = s => `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
   const deg = d => d*Math.PI/180;
   function centroid(pts){let sx=0,sy=0;for(const [x,y] of pts){sx+=x;sy+=y}return [sx/pts.length,sy/pts.length]}
@@ -112,8 +100,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function distanceSq(a,b){ const dx=a[0]-b[0], dy=a[1]-b[1]; return dx*dx+dy*dy; }
   function drawPath(ctx, pts){ ctx.beginPath(); pts.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y)); ctx.closePath(); }
   function drawPolygon(ctx, pts, fill=null, stroke="#222", lw=2){ if(!pts.length) return; drawPath(ctx, pts); if(fill){ctx.fillStyle=fill; ctx.fill();} if(stroke&&lw){ctx.strokeStyle=stroke; ctx.lineWidth=lw; ctx.stroke();} }
+  const roundPts = poly => poly.map(([x,y])=>[Math.round(x),Math.round(y)]);
 
-  // キャンバス
+  // Canvas
   const canvas=$id('game'); if(!canvas){ alert('canvas #game が見つかりません'); return; }
   const ctx=canvas.getContext('2d',{willReadFrequently:true});
   canvas.style.touchAction='none';
@@ -126,14 +115,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const offUd=document.createElement('canvas'); offUd.width=WORLD_W; offUd.height=WORLD_H; const ctxUd=offUd.getContext('2d',{willReadFrequently:true});
   const tmp=document.createElement('canvas'); tmp.width=WORLD_W; tmp.height=WORLD_H; const ctxX=tmp.getContext('2d',{willReadFrequently:true});
   ;[ctxT,ctxU,ctxUd,ctxX].forEach(c=>c.imageSmoothingEnabled=false);
-  const roundPts = poly => poly.map(([x,y])=>[Math.round(x),Math.round(y)]);
   function alphaCount(ctx,w,h){ const d=ctx.getImageData(0,0,w,h).data; let c=0; for(let i=3;i<d.length;i+=4){ if(d[i]!==0) c++; } return c; }
   function drawDilated(ctx, pts, dilatePx){
     drawPath(ctx, pts); ctx.fillStyle='#000'; ctx.fill();
     if(dilatePx>0){ ctx.lineWidth=dilatePx*2; ctx.lineJoin='miter'; ctx.miterLimit=8; ctx.strokeStyle='#000'; ctx.stroke(); }
   }
 
-  // ピース状態
+  // Pieces
   function resetPieces(){
     state.pieces = TANGRAM_PIECES.map((shape,i)=>({
       id:i, shape:shape.map(([x,y])=>[x,y]),
@@ -142,14 +130,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }));
     state.selectedId=null;
   }
-  function copyPieces(pieces){ return pieces.map(p=>({id:p.id, shape:p.shape.map(([x,y])=>[x,y]), color:p.color, offset:[...p.offset], angle:p.angle, flipped:p.flipped})); }
+  const copyPieces = arr => arr.map(p=>({id:p.id,shape:p.shape.map(([x,y])=>[x,y]),color:p.color,offset:[...p.offset],angle:p.angle,flipped:p.flipped}));
 
-  // 描画ループ
+  // Render
   function render(){
     ctx.clearRect(0,0,WORLD_W,WORLD_H);
     const cur = ACTIVE_PUZZLES[state.puzzleIndex];
     drawPolygon(ctx, cur.target, '#2b2b2b', '#444', 2);
-
     const ts=state.pieces.map(p=>({...p,world:transform(p.shape,p.offset,p.angle,p.flipped)}));
     ts.forEach(p=>{ ctx.save(); ctx.shadowColor='rgba(0,0,0,.22)'; ctx.shadowBlur=8; ctx.shadowOffsetY=4; drawPolygon(ctx,p.world,p.color,'#1a1a1a',2); ctx.restore(); });
     if(state.selectedId!=null){ const p=ts.find(pp=>pp.id===state.selectedId); if(p){ ctx.save(); ctx.setLineDash([6,4]); drawPolygon(ctx,p.world,null,'#e5e7eb',2); ctx.restore(); } }
@@ -157,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   requestAnimationFrame(render);
 
-  // ヒットテスト
+  // Hit & drag (play only, not during flash)
   function hitTest(x,y){
     for(let i=state.pieces.length-1;i>=0;i--){
       const p=state.pieces[i], world=transform(p.shape,p.offset,p.angle,p.flipped);
@@ -168,15 +155,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const drag={active:false,id:null,last:[0,0]};
   function canvasXY(e){ const r=canvas.getBoundingClientRect(); const sx=canvas.width/r.width, sy=canvas.height/r.height; return [(e.clientX-r.left)*sx,(e.clientY-r.top)*sy]; }
 
-  // 入力（プレイ中のみ、フラッシュ中は無効）
   canvas.addEventListener('pointerdown',e=>{
     if(state.step!=='play' || state.frozen) return; e.preventDefault(); canvas.setPointerCapture(e.pointerId);
     const [x,y]=canvasXY(e);
     const id=hitTest(x,y);
-    let moveId = id!=null ? id : state.selectedId;   // ピース外でも選択中を動かす
+    let moveId = id!=null ? id : state.selectedId;
     if(moveId!=null){
       drag.active=true; drag.id=moveId; drag.last=[x,y];
-      if(id!=null){ // 新しく触ったピースを選択＆最前面へ
+      if(id!=null){
         state.selectedId=id;
         const idx=state.pieces.findIndex(p=>p.id===id); const [pk]=state.pieces.splice(idx,1); state.pieces.push(pk);
       }
@@ -190,8 +176,6 @@ document.addEventListener('DOMContentLoaded', () => {
   canvas.addEventListener('pointerup',e=>{
     if(!drag.active) return; e.preventDefault();
     const id=drag.id; drag.active=false; drag.id=null; drag.last=[0,0];
-
-    // スナップ
     const me=state.pieces.find(p=>p.id===id);
     const myPts=transform(me.shape,me.offset,me.angle,me.flipped);
     const targetPts=ACTIVE_PUZZLES[state.puzzleIndex].target;
@@ -202,24 +186,23 @@ document.addEventListener('DOMContentLoaded', () => {
   },{passive:false});
   canvas.addEventListener('pointercancel',()=>{ drag.active=false; drag.id=null; drag.last=[0,0]; },{passive:false});
 
-  // 回転 / 反転
+  // Rotate/flip
   function rotateSelected(){ if(state.selectedId==null || state.step!=='play' || state.frozen) return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,angle:(p.angle+45)%360}:p); }
   function flipSelected(){ if(state.selectedId==null || state.step!=='play' || state.frozen) return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,flipped:!p.flipped}:p); }
   $id('rotateMobile')?.addEventListener('click', rotateSelected);
   $id('flipMobile')?.addEventListener('click',  flipSelected);
   window.addEventListener('keydown',(e)=>{ if(state.step!=='play'||state.selectedId==null||state.frozen) return; if(e.key==='r'||e.key==='R') rotateSelected(); if(e.key==='f'||e.key==='F') flipSelected(); });
 
-  // タイマー
+  // Timer
   let startAt=0;
   function updateTimer(){ if(timerEl) timerEl.textContent=fmtTime(state.elapsed); }
   function stopTimer(){ if(state.timerId){ clearInterval(state.timerId); state.timerId=null; } }
   function resetTimer(){ stopTimer(); state.elapsed=0; updateTimer(); }
   function startTimer(){ stopTimer(); startAt=Date.now(); state.timerId=setInterval(()=>{ state.elapsed=Math.floor((Date.now()-startAt)/1000); updateTimer(); },500); }
 
-  // タイトル
   function setPuzzleTitle(){ if(puzzleTitle) puzzleTitle.textContent=ACTIVE_PUZZLES[state.puzzleIndex].title; }
 
-  // ===== カウントダウン → 正解レイアウトを一瞬表示 =====
+  // ===== カウントダウン → 正解レイアウト（ID対応） =====
   async function countdown3(){
     countScreen.classList.remove('hidden');
     countdownEl.textContent='3'; await new Promise(r=>setTimeout(r, COUNT_STEP_MS));
@@ -230,37 +213,35 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function flashSolutionThen(cb){
     const title = ACTIVE_PUZZLES[state.puzzleIndex].title;
-    const layout = getLayout(title);
-    if(!layout){ cb?.(); return; }        // 正解未登録ならスキップ
-    await countdown3();                   // 3,2,1
-    state.frozen = true;                  // 入力を一時停止
+    const layoutObj = getLayout(title);
+    if(!layoutObj || !layoutObj.byId){ cb?.(); return; }
+
+    await countdown3();
+    state.frozen = true;
     const backup = copyPieces(state.pieces);
 
-    // 正解配置に反映
-    if(layout.length === state.pieces.length){
-      state.pieces = state.pieces.map((p,i)=>({
-        ...p,
-        offset:[layout[i].offset[0], layout[i].offset[1]],
-        angle: layout[i].angle,
-        flipped: !!layout[i].flipped
-      }));
-    }
+    // ★IDで適用
+    const byId = layoutObj.byId;
+    state.pieces = state.pieces.map(p=>{
+      const rec = byId[String(p.id)];
+      return rec ? {...p, offset:[rec.offset[0],rec.offset[1]], angle:rec.angle, flipped:!!rec.flipped} : p;
+    });
 
-    // 1秒見せる
     await new Promise(r=>setTimeout(r, FLASH_MS));
-
-    // 元に戻す
     state.pieces = backup;
     state.frozen = false;
     cb?.();
   }
 
-  // ===== 管理者：現在の並びを「正解レイアウト」として保存 =====
+  // ===== 管理者：現在の並びを正解として保存（IDキーで保存） =====
   function saveCurrentAsAnswer(){
     const title = ACTIVE_PUZZLES[state.puzzleIndex].title;
-    const layout = state.pieces.map(p=>({ offset:[...p.offset], angle:p.angle, flipped:!!p.flipped }));
-    setLayout(title, layout);
-    alert(`「${title}」の正解レイアウトを保存しました！`);
+    const byId = {};
+    state.pieces.forEach(p=>{
+      byId[String(p.id)] = { offset:[...p.offset], angle:p.angle, flipped:!!p.flipped };
+    });
+    setLayout(title, byId);
+    alert(`「${title}」の正解レイアウトを保存しました！（ID対応）`);
   }
   if (ADMIN_MODE) {
     saveLayoutBtn.addEventListener('click', saveCurrentAsAnswer);
@@ -284,14 +265,12 @@ document.addEventListener('DOMContentLoaded', () => {
     polys.forEach(poly => drawDilated(ctxU,  poly, 0));
     polys.forEach(poly => drawDilated(ctxUd, poly, tol));
 
-    // outside = U - T_expanded
     ctxX.drawImage(offU,0,0);
     ctxX.globalCompositeOperation='destination-out';
     ctxX.drawImage(offT,0,0);
     ctxX.globalCompositeOperation='source-over';
     const outside = alphaCount(ctxX,WORLD_W,WORLD_H);
 
-    // gaps = T - U_expanded
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
     drawDilated(ctxX, tgt, 0);
     ctxX.globalCompositeOperation='destination-out';
@@ -299,7 +278,6 @@ document.addEventListener('DOMContentLoaded', () => {
     ctxX.globalCompositeOperation='source-over';
     const gaps = alphaCount(ctxX,WORLD_W,WORLD_H);
 
-    // overlaps = sum(piece) - union(U)
     const unionArea = alphaCount(ctxU,WORLD_W,WORLD_H);
     let sum=0; for(const poly of polys){ ctxX.clearRect(0,0,WORLD_W,WORLD_H); drawDilated(ctxX, poly, 0); sum+=alphaCount(ctxX,WORLD_W,WORLD_H); }
     const overlap = Math.max(0, sum - unionArea);
@@ -311,11 +289,10 @@ document.addEventListener('DOMContentLoaded', () => {
     return {ok:true};
   }
 
-  // ボタン
+  // Buttons
   $id('start')?.addEventListener('click', () => { if(state.step==='home') startFirstHalf(); });
   $id('judge')?.addEventListener('click', onJudge);
 
-  // 前半/後半開始
   function startFirstHalf(){
     state.step='play'; state.results=[]; state.puzzleIndex=0;
     setPuzzleTitle(); resetPieces(); resetTimer(); startTimer();
@@ -323,15 +300,9 @@ document.addEventListener('DOMContentLoaded', () => {
   function startSecondHalf(){
     state.step='play'; state.puzzleIndex=5;
     setPuzzleTitle(); resetPieces(); resetTimer();
-    // 正解レイアウト → 計測開始
-    if (FLASH_FLAGS[state.puzzleIndex]) {
-      flashSolutionThen(()=>{ startTimer(); });
-    } else {
-      startTimer();
-    }
+    flashSolutionThen(()=>{ startTimer(); });
   }
 
-  // 判定→次へ
   function onJudge(){
     const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
     stopTimer();
@@ -348,7 +319,6 @@ document.addEventListener('DOMContentLoaded', () => {
       alert(`CLEAR!\n課題: ${ACTIVE_PUZZLES[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
       state.puzzleIndex++;
       setPuzzleTitle(); resetPieces(); resetTimer();
-
       if(FLASH_FLAGS[state.puzzleIndex]) flashSolutionThen(()=>{ startTimer(); });
       else                               startTimer();
     }else{
@@ -358,22 +328,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 初期セット
-  function updateTimer(){ if(timerEl) timerEl.textContent=fmtTime(state.elapsed); }
-  setPuzzleTitle(); resetPieces(); updateTimer();
+  // Init
+  let startAt=0;
+  function resetTimer(){ if(state.timerId){clearInterval(state.timerId)}; state.timerId=null; state.elapsed=0; if(timerEl) timerEl.textContent='00:00'; }
+  function startTimer(){ if(state.timerId){clearInterval(state.timerId)}; startAt=Date.now(); state.timerId=setInterval(()=>{ state.elapsed=Math.floor((Date.now()-startAt)/1000); if(timerEl) timerEl.textContent=fmtTime(state.elapsed); },500); }
 
-  // 初期可視
-  uiToolbar.classList.add('hidden'); stageWrap.classList.add('hidden'); mobileCtrls.classList.add('hidden');
-  playerEntry.addEventListener('input', () => { startGo.disabled = !playerEntry.value.trim(); });
-  startGo.addEventListener('click', () => {
-    playerInput.value = playerEntry.value.trim();
-    if (patternAEntry.checked) patternA.checked = true;
-    startScreen.classList.add('hidden');
-    uiToolbar.classList.remove('hidden'); stageWrap.classList.remove('hidden'); mobileCtrls.classList.remove('hidden');
-    startFirstHalf();
-  });
-  primeGo.addEventListener('click', () => {
-    primeScreen.classList.add('hidden');
-    startSecondHalf();
-  });
+  function bootstrapUI(){
+    uiToolbar.classList.add('hidden'); stageWrap.classList.add('hidden'); mobileCtrls.classList.add('hidden');
+    playerEntry.addEventListener('input', () => { startGo.disabled = !playerEntry.value.trim(); });
+    startGo.addEventListener('click', () => {
+      playerInput.value = playerEntry.value.trim();
+      if (patternAEntry.checked) patternA.checked = true;
+      startScreen.classList.add('hidden');
+      uiToolbar.classList.remove('hidden'); stageWrap.classList.remove('hidden'); mobileCtrls.classList.remove('hidden');
+      startFirstHalf();
+    });
+    primeGo.addEventListener('click', () => {
+      primeScreen.classList.add('hidden');
+      startSecondHalf();
+    });
+  }
+
+  setPuzzleTitle(); resetPieces(); if(timerEl) timerEl.textContent='00:00'; bootstrapUI();
 });
