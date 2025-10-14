@@ -11,7 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // === Sheets 送信設定（ココをあなたの環境に合わせる）===
   const SHEETS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbxcva2qrDlBsbvuOkYOI1CF3CurxH31IO9yhvUILOgAcLJhJ1BnLqQp6mCUTb0QlhoJaQ/exec';
-  const SHEETS_TOKEN    = 'CHANGE_ME_SECRET_32+CHARS'; // ← GAS側の TOKEN と同じに！
+  const SHEETS_TOKEN    = 'tangram_1'; // ← GAS側の TOKEN と同じに！
 
   // 送信ユーティリティ（最小セット＋ prime_exposure_ms）
   function getDeviceCategory(){
