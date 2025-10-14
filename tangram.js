@@ -1,27 +1,27 @@
-// Tangram AB – パターンA: A(通常)→B(フラッシュ) / パターンB: B(通常)→A(フラッシュ)
-// スマホでの 3,2,1 & 解答フラッシュ確実表示、開始フォールバック、localStorage耐性
-// PCスクロール無効＋キャンバス内描画を上に寄せ（CANVAS_Y_OFFSET）
-// 隙間誤検知対策：DPR連動の膨張、角の丸め、面積ベースの許容量、ctxXはtranslateしない
-// ★ 送信機能：GAS（スプレッドシート）へ最小セット＋prime_exposure_ms を記録
+// Tangram AB – 送信＆集計修正版
+// - 各試行ごとに即送信
+// - 終了時にまとめ送信＋TOTAL行
+// - 合計は state.results の合算で正確に
 
 document.addEventListener('DOMContentLoaded', () => {
   const WORLD_W=1500, WORLD_H=900, SNAP=25;
-  const CANVAS_Y_OFFSET = -60; // 画面内の描画を上に寄せる（-で上、+で下）
+  const CANVAS_Y_OFFSET = -60;
   const COUNT_STEP_MS=700, FLASH_MS=1000;
-  const DILATE_PX = Math.max(4, Math.round(window.devicePixelRatio * 2)); // 判定膨張量
+  const DILATE_PX = Math.max(4, Math.round(window.devicePixelRatio * 2));
 
-  // === Sheets 送信設定（ここをあなたの環境に合わせて設定）===
+  // === Sheets 送信設定（ココをあなたの環境に合わせる）===
   const SHEETS_ENDPOINT = 'https://script.google.com/macros/s/AKfycby_BmPBz_A39l4DoholG2jF3rxjGsdzM3uBcRn9ys8t1d6S0v3tBhCUdxpabgVy5cS66g/exec';
-  const SHEETS_TOKEN    = 'CHANGE_ME_SECRET_32+CHARS'; // ← GAS側の TOKEN と同じ文字列に変更してください
+  const SHEETS_TOKEN    = 'CHANGE_ME_SECRET_32+CHARS'; // ← GAS側の TOKEN と同じに！
 
-  // --- 送信ユーティリティ（最小セット） ---
+  // 送信ユーティリティ（最小セット＋ prime_exposure_ms）
   function getDeviceCategory(){
     const ua = navigator.userAgent || '';
     if (/iPad|Android(?!.*Mobile)|Tablet/i.test(ua)) return 'tablet';
     if (/iPhone|Android.+Mobile|Windows Phone|iPod/i.test(ua)) return 'mobile';
     return 'pc';
   }
-  function buildRowMinimal({ participant_id, pattern, block_index, condition, trial_index, puzzle_title, time_sec, prime_exposure_ms }) {
+  // 単発送信用（payload が1行）
+  function buildRowSingle({ participant_id, pattern, block_index, condition, trial_index, puzzle_title, time_sec, prime_exposure_ms }) {
     return {
       token: SHEETS_TOKEN,
       participant_id,
@@ -35,16 +35,32 @@ document.addEventListener('DOMContentLoaded', () => {
       prime_exposure_ms
     };
   }
+  // まとめ送信用 rows（配列要素。tokenは外側にのみ入れる）
+  function buildRowPlain({ participant_id, pattern, block_index, condition, trial_index, puzzle_title, time_sec, prime_exposure_ms }) {
+    return {
+      participant_id,
+      pattern,
+      block_index,
+      condition,
+      trial_index,
+      puzzle_title,
+      time_sec,
+      device_category: getDeviceCategory(),
+      prime_exposure_ms
+    };
+  }
   async function postToSheets(payload){
     try {
+      console.log('[Sheets] post', payload);
       await fetch(SHEETS_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        mode: 'no-cors', // GASのCORS制約に合わせて投げっぱなし
+        mode: 'no-cors',
         body: JSON.stringify(payload)
       });
       return true;
-    } catch {
+    } catch (e) {
+      console.warn('[Sheets] post failed', e);
       return false;
     }
   }
@@ -88,7 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const ADMIN=location.search.includes('admin=1');
   if(ADMIN){ saveBtn.classList.remove('hidden'); adminBadge.classList.remove('hidden'); }
 
-  // ===== localStorage 耐性 =====
+  // ===== localStorage =====
   const LKEY='tangramLayouts_v1';
   let memStore={};
   const loadLs=()=>{ try{ return JSON.parse(localStorage.getItem(LKEY)||'{}'); }catch(_){ return {...memStore}; } };
@@ -97,9 +113,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const setLayout=(t,byId)=>{ const all=loadLs(); all[t]={v:1,byId}; saveLs(all); };
 
   // ===== 状態 =====
-  const state={pieces:[],selectedId:null,puzzleIndex:0,step:'home',results:[],elapsed:0,timerId:null,frozen:false, pattern:'A', lastPrimeExposureMs:0};
+  const state={
+    pieces:[], selectedId:null, puzzleIndex:0,
+    step:'home', results:[], elapsed:0, timerId:null, frozen:false,
+    pattern:'A', lastPrimeExposureMs:0
+  };
 
-  // ===== Utils & Canvas =====
+  // ===== Canvas & Utils =====
   const canvas=$('game'); const ctx=canvas.getContext('2d',{willReadFrequently:true});
   function rez(){ canvas.width=WORLD_W; canvas.height=WORLD_H; } window.addEventListener('resize',rez); rez();
   const deg=d=>d*Math.PI/180;
@@ -111,7 +131,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const roundPts=poly=>poly.map(([x,y])=>[Math.round(x),Math.round(y)]);
   const fmt=s=>`${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;
 
-  // 判定用オフスクリーン
   const mk=()=>{const c=document.createElement('canvas');c.width=WORLD_W;c.height=WORLD_H;const k=c.getContext('2d',{willReadFrequently:true});k.imageSmoothingEnabled=false;return[c,k];}
   const [cT,ctxT]=mk(),[cU,ctxU]=mk(),[cUd,ctxUd]=mk(),[tmp,ctxX]=mk();
   const alphaCount=(k,w,h)=>{const d=k.getImageData(0,0,w,h).data;let c=0;for(let i=3;i<d.length;i+=4){if(d[i]!==0)c++;}return c;}
@@ -130,7 +149,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ===== パターン切替 =====
   function currentSets(){
     if(state.pattern==='B'){
       return { ACTIVE: PUZZLES_B.concat(PUZZLES_A),
@@ -141,47 +159,38 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ===== ピース =====
   function resetPieces(){
     state.pieces=PIECES.map((s,i)=>({
       id:i, shape:s.map(([x,y])=>[x,y]),
       color:COLORS[i%COLORS.length],
-      offset:[80+i*200, 620], // 下が見切れないように上げる
+      offset:[80+i*200, 620],
       angle:0, flipped:false
     }));
     state.selectedId=null;
   }
   const copyPieces=arr=>arr.map(p=>({id:p.id,shape:p.shape.map(([x,y])=>[x,y]),color:p.color,offset:[...p.offset],angle:p.angle,flipped:p.flipped}));
 
-  // ===== 描画（上に寄せる）=====
   function render(){
     const {ACTIVE}=currentSets();
     ctx.clearRect(0,0,WORLD_W,WORLD_H);
-
-    ctx.save();
-    ctx.translate(0, CANVAS_Y_OFFSET); // 表示全体を上に
-
+    ctx.save(); ctx.translate(0, CANVAS_Y_OFFSET);
     drawPoly(ctx, ACTIVE[state.puzzleIndex].target, '#2b2b2b', '#444', 2);
     const ts=state.pieces.map(p=>({...p,world:transform(p.shape,p.offset,p.angle,p.flipped)}));
     ts.forEach(p=>{ctx.save();ctx.shadowColor='rgba(0,0,0,.22)';ctx.shadowBlur=8;ctx.shadowOffsetY=4;drawPoly(ctx,p.world,p.color,'#1a1a1a',2);ctx.restore();});
     if(state.selectedId!=null){ const p=ts.find(pp=>pp.id===state.selectedId); if(p){ ctx.save(); ctx.setLineDash([6,4]); drawPoly(ctx,p.world,null,'#e5e7eb',2); ctx.restore(); } }
-
     ctx.restore();
     requestAnimationFrame(render);
   }
   requestAnimationFrame(render);
 
-  // ===== 入力（どこでもドラッグ）=====
   function hit(x,y){
-    ctx.save();
-    ctx.translate(0, CANVAS_Y_OFFSET); // 当たり判定も同じ座標系
+    ctx.save(); ctx.translate(0, CANVAS_Y_OFFSET);
     for(let i=state.pieces.length-1;i>=0;i--){
       const p=state.pieces[i],w=transform(p.shape,p.offset,p.angle,p.flipped);
       drawPath(ctx,w);
       if(ctx.isPointInPath(x,y)){ ctx.restore(); return p.id; }
     }
-    ctx.restore();
-    return null;
+    ctx.restore(); return null;
   }
   const drag={active:false,id:null,last:[0,0]};
   const canvasXY=e=>{const r=canvas.getBoundingClientRect(),sx=canvas.width/r.width,sy=canvas.height/r.height;return[(e.clientX-r.left)*sx,(e.clientY-r.top)*sy]}
@@ -211,38 +220,29 @@ document.addEventListener('DOMContentLoaded', () => {
   },{passive:false});
   canvas.addEventListener('pointercancel',()=>{ drag.active=false; drag.id=null; drag.last=[0,0]; },{passive:false});
 
-  // 回転/反転
   const rotate=()=>{ if(state.selectedId==null||state.step!=='play'||state.frozen) return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,angle:(p.angle+45)%360}:p); };
   const flip=()=>{ if(state.selectedId==null||state.step!=='play'||state.frozen) return; state.pieces=state.pieces.map(p=>p.id===state.selectedId?{...p,flipped:!p.flipped}:p); };
   $('rotateMobile')?.addEventListener('click',rotate); $('flipMobile')?.addEventListener('click',flip);
   window.addEventListener('keydown',e=>{ if(state.step!=='play'||state.selectedId==null||state.frozen) return; if(e.key==='r'||e.key==='R') rotate(); if(e.key==='f'||e.key==='F') flip(); });
 
-  // タイマー
   let startAt=0; const upd=()=>{ if(timerEl) timerEl.textContent = fmt(state.elapsed); };
   const stop=()=>{ if(state.timerId){ clearInterval(state.timerId); state.timerId=null; } };
   const reset=()=>{ stop(); state.elapsed=0; upd(); };
   const start=()=>{ stop(); startAt=Date.now(); state.timerId=setInterval(()=>{ state.elapsed=Math.floor((Date.now()-startAt)/1000); upd(); },500); };
   const setTitle=()=>{ const {ACTIVE}=currentSets(); if(titleEl) titleEl.textContent=ACTIVE[state.puzzleIndex].title; };
 
-  // オーバーレイ（モバイル確実表示）
   const wait=ms=>new Promise(r=>setTimeout(r,ms));
   async function showOverlay(el){ el.classList.remove('hidden'); el.style.display='flex'; void el.offsetWidth; await wait(50); }
   function hideOverlay(el){ el.classList.add('hidden'); el.style.display=''; }
   async function countdown3(){ await showOverlay(countScreen); countdownEl.textContent='3'; await wait(COUNT_STEP_MS); countdownEl.textContent='2'; await wait(COUNT_STEP_MS); countdownEl.textContent='1'; await wait(COUNT_STEP_MS); hideOverlay(countScreen); }
-
-  // requestAnimationFrame を挟んで画面反映後から実測
   const nextFrame = () => new Promise(r => requestAnimationFrame(() => r()));
 
-  // フラッシュ（保存レイアウトを1秒だけ表示）＋ 実提示時間の計測
   async function flashThen(cb){
     await countdown3();
     const {ACTIVE}=currentSets();
     const rec=getLayout(ACTIVE[state.puzzleIndex].title);
-
-    state.lastPrimeExposureMs = 0; // デフォルト（control時や未保存時）
-
+    state.lastPrimeExposureMs = 0;
     if(!rec || !rec.byId){ cb?.(); return; }
-
     state.frozen=true;
     const backup=copyPieces(state.pieces);
     const byId=rec.byId;
@@ -251,22 +251,15 @@ document.addEventListener('DOMContentLoaded', () => {
       angle:byId[String(p.id)].angle,
       flipped:!!byId[String(p.id)].flipped
     } : p);
-
-    await nextFrame();
-    const t0 = performance.now();
-
+    await nextFrame(); const t0=performance.now();
     await wait(FLASH_MS);
-
     state.pieces=backup;
-    await nextFrame();
-    const t1 = performance.now();
-
+    await nextFrame(); const t1=performance.now();
     state.lastPrimeExposureMs = Math.round(t1 - t0);
     state.frozen=false;
     cb?.();
   }
 
-  // 管理者保存
   function saveAnswer(){
     const {ACTIVE}=currentSets();
     const t=ACTIVE[state.puzzleIndex].title; const byId={};
@@ -279,40 +272,32 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('keydown',e=>{ if(e.altKey&&(e.key==='s'||e.key==='S')) saveAnswer(); });
   }
 
-  // ===== 判定（DPR耐性＋二重オフセット回避）=====
   function judge(){
     const {ACTIVE}=currentSets();
     const tgt=roundPts(ACTIVE[state.puzzleIndex].target);
     const polys=state.pieces.map(p=> roundPts(transform(p.shape,p.offset,p.angle,p.flipped)) );
 
-    // クリア
     ctxT.clearRect(0,0,WORLD_W,WORLD_H);
     ctxU.clearRect(0,0,WORLD_W,WORLD_H);
     ctxUd.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
 
-    // ---- T/U/Ud は “上オフセット” を適用して描画
     [ctxT, ctxU, ctxUd].forEach(k=>{ k.save(); k.translate(0, CANVAS_Y_OFFSET); });
 
-    // DPRに応じた膨張量
     const px = DILATE_PX;
     const tolTarget = Math.max(3, px);
     const tolPiece  = Math.max(3, px);
 
-    // ターゲット / ピース
     drawDil(ctxT, tgt, tolTarget);
     polys.forEach(pl=>drawDil(ctxU,  pl, 0));
     polys.forEach(pl=>drawDil(ctxUd, pl, tolPiece));
 
-    // 解除（ビットマップはオフセット込み）
     [ctxT, ctxU, ctxUd].forEach(k=>k.restore());
 
-    // 面積ベースの許容
     const targetArea = alphaCount(ctxT, WORLD_W, WORLD_H);
     const AREA_TOL   = Math.max(5000, Math.round(targetArea * 0.0035));
     const OUT_TOL    = Math.round(AREA_TOL * 0.5);
 
-    // ---- outside = U - T（ctxX は translate しない）
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.drawImage(cU,0,0);
     ctxX.globalCompositeOperation='destination-out';
@@ -320,7 +305,6 @@ document.addEventListener('DOMContentLoaded', () => {
     ctxX.globalCompositeOperation='source-over';
     const outside = alphaCount(ctxX,WORLD_W,WORLD_H);
 
-    // ---- gaps = T - U_dilated
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.drawImage(cT,0,0);
     ctxX.globalCompositeOperation='destination-out';
@@ -328,11 +312,10 @@ document.addEventListener('DOMContentLoaded', () => {
     ctxX.globalCompositeOperation='source-over';
     const gaps = alphaCount(ctxX,WORLD_W,WORLD_H);
 
-    // ---- overlaps = sum(piece) - union(U)
     const unionArea = alphaCount(ctxU,WORLD_W,WORLD_H);
     let sum=0;
     for(const pl of polys){
-      const plOff = pl.map(([x,y])=>[x, y + CANVAS_Y_OFFSET]); // ctxXに描く時だけY補正
+      const plOff = pl.map(([x,y])=>[x, y + CANVAS_Y_OFFSET]);
       ctxX.clearRect(0,0,WORLD_W,WORLD_H);
       drawDil(ctxX, plOff, 0);
       sum += alphaCount(ctxX,WORLD_W,WORLD_H);
@@ -358,49 +341,88 @@ document.addEventListener('DOMContentLoaded', () => {
     flashThen(()=>start());
   }
 
-  // 判定→記録→次へ
+  // 判定→記録→送信→遷移
   function onJudge(){
     const {ACTIVE, FLASH}=currentSets();
     const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
     stop();
 
+    // === ここで毎試行を state.results に記録 ===
     const isPrime = !!FLASH[state.puzzleIndex];
-    const row = buildRowMinimal({
+    const record = {
+      puzzleIndex: state.puzzleIndex + 1,
+      puzzleTitle: ACTIVE[state.puzzleIndex].title,
+      condition: isPrime ? 'prime' : 'control',
+      blockIndex: state.puzzleIndex < 5 ? 1 : 2,
+      timeSec: state.elapsed,
+      primeExposureMs: isPrime ? (state.lastPrimeExposureMs || 0) : 0
+    };
+    state.results.push(record);
+
+    // === 各試行を即送信（図形ごとのタイムを確実に残す） ===
+    postToSheets(buildRowSingle({
       participant_id: (player.value||'').trim(),
       pattern: state.pattern,
-      block_index: state.puzzleIndex < 5 ? 1 : 2,
-      condition: isPrime ? 'prime' : 'control',
-      trial_index: (state.puzzleIndex % 5) + 1,
-      puzzle_title: ACTIVE[state.puzzleIndex].title,
-      time_sec: state.elapsed,
-      prime_exposure_ms: isPrime ? (state.lastPrimeExposureMs || 0) : 0
-    });
-    postToSheets(row); // 1件ずつ即時送信（まとめ送信にしたい場合はここをコメントアウト）
+      block_index: record.blockIndex,
+      condition: record.condition,
+      trial_index: ((state.puzzleIndex % 5) + 1),
+      puzzle_title: record.puzzleTitle,
+      time_sec: record.timeSec,
+      prime_exposure_ms: record.primeExposureMs
+    }));
 
-    const finishedThis = `CLEAR!\n課題: ${ACTIVE[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`;
-    alert(finishedThis);
+    alert(`CLEAR!\n課題: ${record.puzzleTitle}\nタイム: ${record.timeSec}秒`);
 
+    // 遷移
     if(state.puzzleIndex===4){
       state.step='prime'; primeScreen.classList.remove('hidden'); return;
     }
-    if(state.puzzleIndex<ACTIVE.length-1){
+    if(state.puzzleIndex< (currentSets().ACTIVE.length - 1) ){
       state.puzzleIndex++; setTitle(); resetPieces(); reset();
-      (FLASH[state.puzzleIndex] ? flashThen : (cb=>cb&&cb()))(()=>start());
+      (isNextPrime() ? flashThen : (cb=>cb&&cb()))(()=>start());
     }else{
-      const total=state.results.reduce((a,b)=>a+b.timeSec,0);
+      // === 10問終了：合計算出 & まとめ送信（TOTAL行付き） ===
+      const total = state.results.reduce((a,b)=>a + (b.timeSec||0), 0);
+      const rows = state.results.map(r => buildRowPlain({
+        participant_id: (player.value||'').trim(),
+        pattern: state.pattern,
+        block_index: r.blockIndex,
+        condition: r.condition,
+        trial_index: ((r.puzzleIndex-1) % 5) + 1,
+        puzzle_title: r.puzzleTitle,
+        time_sec: r.timeSec,
+        prime_exposure_ms: r.primeExposureMs
+      }));
+      // TOTAL行（condition='summary', trial_index=0）
+      rows.push(buildRowPlain({
+        participant_id: (player.value||'').trim(),
+        pattern: state.pattern,
+        block_index: 'all',
+        condition: 'summary',
+        trial_index: 0,
+        puzzle_title: 'TOTAL',
+        time_sec: total,
+        prime_exposure_ms: ''
+      }));
+      postToSheets({ token: SHEETS_TOKEN, rows });
+
       alert(`10問クリア！合計: ${total} 秒`);
       state.step='finished';
     }
   }
 
-  // 開始/プライム（HTMLの onclick フォールバックからも呼べる）
+  function isNextPrime(){
+    const {FLASH}=currentSets();
+    return FLASH[state.puzzleIndex]; // onJudge後に+1する前のインデックスを使って、次を判断
+  }
+
+  // 開始/プライム
   window.__startGo = function(){
     const name=(playerEntry?.value||'').trim();
     if(!name){ alert('お名前（participant_id）を入力してください'); playerEntry?.focus(); return; }
     player.value=name;
     state.pattern = (patternBEntry?.checked || patternB?.checked) ? 'B' : 'A';
     if(state.pattern==='B'){ patternB.checked=true; } else { patternA.checked=true; }
-
     startScreen.classList.add('hidden');
     ui.classList.remove('hidden'); stageWrap.classList.remove('hidden'); mobileCtrls.classList.remove('hidden');
     firstHalf();
@@ -410,5 +432,5 @@ document.addEventListener('DOMContentLoaded', () => {
   // 初期表示
   ui.classList.add('hidden'); stageWrap.classList.add('hidden'); mobileCtrls.classList.add('hidden');
   if(timerEl) timerEl.textContent='00:00';
-  titleEl.textContent = (PUZZLES_A[0]?.title || '—');
+  const {ACTIVE}=currentSets(); titleEl.textContent = (ACTIVE[0]?.title || '—');
 });
