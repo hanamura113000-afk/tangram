@@ -1,15 +1,53 @@
 // Tangram AB – パターンA: A(通常)→B(フラッシュ) / パターンB: B(通常)→A(フラッシュ)
 // スマホでの 3,2,1 & 解答フラッシュ確実表示、開始フォールバック、localStorage耐性
 // PCスクロール無効＋キャンバス内描画を上に寄せ（CANVAS_Y_OFFSET）
-// ★ 隙間誤検知対策：DPR連動の膨張、角の丸め、面積ベースの許容量、ctxXはtranslateしない
+// 隙間誤検知対策：DPR連動の膨張、角の丸め、面積ベースの許容量、ctxXはtranslateしない
+// ★ 送信機能：GAS（スプレッドシート）へ最小セット＋prime_exposure_ms を記録
 
 document.addEventListener('DOMContentLoaded', () => {
   const WORLD_W=1500, WORLD_H=900, SNAP=25;
-  const CANVAS_Y_OFFSET = -60; // ★画面内の描画を上に寄せる（-で上、+で下）
+  const CANVAS_Y_OFFSET = -60; // 画面内の描画を上に寄せる（-で上、+で下）
   const COUNT_STEP_MS=700, FLASH_MS=1000;
+  const DILATE_PX = Math.max(4, Math.round(window.devicePixelRatio * 2)); // 判定膨張量
 
-  // DPRに応じて判定の膨張量を増やす
-  const DILATE_PX = Math.max(4, Math.round(window.devicePixelRatio * 2));
+  // === Sheets 送信設定（ここをあなたの環境に合わせて設定）===
+  const SHEETS_ENDPOINT = 'https://script.google.com/macros/s/AKfycby_BmPBz_A39l4DoholG2jF3rxjGsdzM3uBcRn9ys8t1d6S0v3tBhCUdxpabgVy5cS66g/exec';
+  const SHEETS_TOKEN    = 'CHANGE_ME_SECRET_32+CHARS'; // ← GAS側の TOKEN と同じ文字列に変更してください
+
+  // --- 送信ユーティリティ（最小セット） ---
+  function getDeviceCategory(){
+    const ua = navigator.userAgent || '';
+    if (/iPad|Android(?!.*Mobile)|Tablet/i.test(ua)) return 'tablet';
+    if (/iPhone|Android.+Mobile|Windows Phone|iPod/i.test(ua)) return 'mobile';
+    return 'pc';
+  }
+  function buildRowMinimal({ participant_id, pattern, block_index, condition, trial_index, puzzle_title, time_sec, prime_exposure_ms }) {
+    return {
+      token: SHEETS_TOKEN,
+      participant_id,
+      pattern,
+      block_index,
+      condition,
+      trial_index,
+      puzzle_title,
+      time_sec,
+      device_category: getDeviceCategory(),
+      prime_exposure_ms
+    };
+  }
+  async function postToSheets(payload){
+    try {
+      await fetch(SHEETS_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        mode: 'no-cors', // GASのCORS制約に合わせて投げっぱなし
+        body: JSON.stringify(payload)
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   // ===== 目標形（A/B） =====
   const PUZZLES_A = [
@@ -41,8 +79,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ===== DOM =====
   const $=id=>document.getElementById(id);
-  const startScreen=$('startScreen'), playerEntry=$('playerEntry'), patternAEntry=$('patternAEntry'), patternBEntry=$('patternBEntry'), startGo=$('startGo');
-  const primeScreen=$('primeScreen'), primeGo=$('primeGo');
+  const startScreen=$('startScreen'), playerEntry=$('playerEntry'), patternAEntry=$('patternAEntry'), patternBEntry=$('patternBEntry');
+  const primeScreen=$('primeScreen');
   const countScreen=$('countScreen'), countdownEl=$('countdown');
   const ui=$('ui'), stageWrap=$('stageWrap'), mobileCtrls=$('mobileControls');
   const player=$('player'), patternA=$('patternA'), patternB=$('patternB'), titleEl=$('puzzleTitle'), timerEl=$('timer');
@@ -59,7 +97,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const setLayout=(t,byId)=>{ const all=loadLs(); all[t]={v:1,byId}; saveLs(all); };
 
   // ===== 状態 =====
-  const state={pieces:[],selectedId:null,puzzleIndex:0,step:'home',results:[],elapsed:0,timerId:null,frozen:false, pattern:'A'};
+  const state={pieces:[],selectedId:null,puzzleIndex:0,step:'home',results:[],elapsed:0,timerId:null,frozen:false, pattern:'A', lastPrimeExposureMs:0};
 
   // ===== Utils & Canvas =====
   const canvas=$('game'); const ctx=canvas.getContext('2d',{willReadFrequently:true});
@@ -78,7 +116,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const [cT,ctxT]=mk(),[cU,ctxU]=mk(),[cUd,ctxUd]=mk(),[tmp,ctxX]=mk();
   const alphaCount=(k,w,h)=>{const d=k.getImageData(0,0,w,h).data;let c=0;for(let i=3;i<d.length;i+=4){if(d[i]!==0)c++;}return c;}
 
-  // 隙間吸収用の「膨張」描画（角を丸める）
   function drawDil(k, pts, px){
     drawPath(k, pts);
     k.fillStyle = '#000';
@@ -109,20 +146,20 @@ document.addEventListener('DOMContentLoaded', () => {
     state.pieces=PIECES.map((s,i)=>({
       id:i, shape:s.map(([x,y])=>[x,y]),
       color:COLORS[i%COLORS.length],
-      offset:[80+i*200, 620], // ★ 680 → 620 に上げる
+      offset:[80+i*200, 620], // 下が見切れないように上げる
       angle:0, flipped:false
     }));
     state.selectedId=null;
   }
   const copyPieces=arr=>arr.map(p=>({id:p.id,shape:p.shape.map(([x,y])=>[x,y]),color:p.color,offset:[...p.offset],angle:p.angle,flipped:p.flipped}));
 
-  // ===== 描画（★上に寄せる）=====
+  // ===== 描画（上に寄せる）=====
   function render(){
     const {ACTIVE}=currentSets();
     ctx.clearRect(0,0,WORLD_W,WORLD_H);
 
     ctx.save();
-    ctx.translate(0, CANVAS_Y_OFFSET); // ★ キャンバス内容を上に寄せる
+    ctx.translate(0, CANVAS_Y_OFFSET); // 表示全体を上に
 
     drawPoly(ctx, ACTIVE[state.puzzleIndex].target, '#2b2b2b', '#444', 2);
     const ts=state.pieces.map(p=>({...p,world:transform(p.shape,p.offset,p.angle,p.flipped)}));
@@ -137,7 +174,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // ===== 入力（どこでもドラッグ）=====
   function hit(x,y){
     ctx.save();
-    ctx.translate(0, CANVAS_Y_OFFSET); // ★ 当たり判定も同じ座標系
+    ctx.translate(0, CANVAS_Y_OFFSET); // 当たり判定も同じ座標系
     for(let i=state.pieces.length-1;i>=0;i--){
       const p=state.pieces[i],w=transform(p.shape,p.offset,p.angle,p.flipped);
       drawPath(ctx,w);
@@ -165,7 +202,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const id=drag.id; drag.active=false; drag.id=null; drag.last=[0,0];
     const {ACTIVE}=currentSets();
     const me=state.pieces.find(p=>p.id===id);
-    const myPts=transform(me.shape,me.offset,me.angle,myFlip=me.flipped);
+    const myPts=transform(me.shape,me.offset,me.angle,me.flipped);
     const targetPts=ACTIVE[state.puzzleIndex].target;
     const others=state.pieces.filter(p=>p.id!==id).flatMap(p=>transform(p.shape,p.offset,p.angle,p.flipped));
     const snaps=[...targetPts,...others]; let best=null,bestD2=SNAP*SNAP;
@@ -193,18 +230,38 @@ document.addEventListener('DOMContentLoaded', () => {
   function hideOverlay(el){ el.classList.add('hidden'); el.style.display=''; }
   async function countdown3(){ await showOverlay(countScreen); countdownEl.textContent='3'; await wait(COUNT_STEP_MS); countdownEl.textContent='2'; await wait(COUNT_STEP_MS); countdownEl.textContent='1'; await wait(COUNT_STEP_MS); hideOverlay(countScreen); }
 
-  // フラッシュ（保存レイアウトを1秒だけ表示）※未保存でもカウントダウンは出す
+  // requestAnimationFrame を挟んで画面反映後から実測
+  const nextFrame = () => new Promise(r => requestAnimationFrame(() => r()));
+
+  // フラッシュ（保存レイアウトを1秒だけ表示）＋ 実提示時間の計測
   async function flashThen(cb){
     await countdown3();
     const {ACTIVE}=currentSets();
     const rec=getLayout(ACTIVE[state.puzzleIndex].title);
-    if(!rec||!rec.byId){ cb?.(); return; }
+
+    state.lastPrimeExposureMs = 0; // デフォルト（control時や未保存時）
+
+    if(!rec || !rec.byId){ cb?.(); return; }
+
     state.frozen=true;
     const backup=copyPieces(state.pieces);
     const byId=rec.byId;
-    state.pieces=state.pieces.map(p=> byId[String(p.id)] ? {...p, offset:[...byId[String(p.id)].offset], angle:byId[String(p.id)].angle, flipped:!!byId[String(p.id)].flipped } : p);
+    state.pieces=state.pieces.map(p=> byId[String(p.id)] ? {...p,
+      offset:[...byId[String(p.id)].offset],
+      angle:byId[String(p.id)].angle,
+      flipped:!!byId[String(p.id)].flipped
+    } : p);
+
+    await nextFrame();
+    const t0 = performance.now();
+
     await wait(FLASH_MS);
+
     state.pieces=backup;
+    await nextFrame();
+    const t1 = performance.now();
+
+    state.lastPrimeExposureMs = Math.round(t1 - t0);
     state.frozen=false;
     cb?.();
   }
@@ -250,7 +307,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 解除（ビットマップはオフセット込み）
     [ctxT, ctxU, ctxUd].forEach(k=>k.restore());
 
-    // しきい値を面積ベースで自動化（ターゲット面積の0.35%）
+    // 面積ベースの許容
     const targetArea = alphaCount(ctxT, WORLD_W, WORLD_H);
     const AREA_TOL   = Math.max(5000, Math.round(targetArea * 0.0035));
     const OUT_TOL    = Math.round(AREA_TOL * 0.5);
@@ -300,30 +357,46 @@ document.addEventListener('DOMContentLoaded', () => {
     state.step='play'; state.puzzleIndex=5; setTitle(); resetPieces(); reset();
     flashThen(()=>start());
   }
+
+  // 判定→記録→次へ
   function onJudge(){
     const {ACTIVE, FLASH}=currentSets();
     const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
     stop();
-    state.results.push({ puzzleIndex: state.puzzleIndex+1, flashed: !!FLASH[state.puzzleIndex], timeSec: state.elapsed });
+
+    const isPrime = !!FLASH[state.puzzleIndex];
+    const row = buildRowMinimal({
+      participant_id: (player.value||'').trim(),
+      pattern: state.pattern,
+      block_index: state.puzzleIndex < 5 ? 1 : 2,
+      condition: isPrime ? 'prime' : 'control',
+      trial_index: (state.puzzleIndex % 5) + 1,
+      puzzle_title: ACTIVE[state.puzzleIndex].title,
+      time_sec: state.elapsed,
+      prime_exposure_ms: isPrime ? (state.lastPrimeExposureMs || 0) : 0
+    });
+    postToSheets(row); // 1件ずつ即時送信（まとめ送信にしたい場合はここをコメントアウト）
+
+    const finishedThis = `CLEAR!\n課題: ${ACTIVE[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`;
+    alert(finishedThis);
 
     if(state.puzzleIndex===4){
-      alert(`CLEAR!\n課題: ${ACTIVE[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
       state.step='prime'; primeScreen.classList.remove('hidden'); return;
     }
     if(state.puzzleIndex<ACTIVE.length-1){
-      alert(`CLEAR!\n課題: ${ACTIVE[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
       state.puzzleIndex++; setTitle(); resetPieces(); reset();
       (FLASH[state.puzzleIndex] ? flashThen : (cb=>cb&&cb()))(()=>start());
     }else{
       const total=state.results.reduce((a,b)=>a+b.timeSec,0);
-      alert(`10問クリア！合計: ${total} 秒`); state.step='finished';
+      alert(`10問クリア！合計: ${total} 秒`);
+      state.step='finished';
     }
   }
 
   // 開始/プライム（HTMLの onclick フォールバックからも呼べる）
   window.__startGo = function(){
     const name=(playerEntry?.value||'').trim();
-    if(!name){ alert('お名前を入力してください'); playerEntry?.focus(); return; }
+    if(!name){ alert('お名前（participant_id）を入力してください'); playerEntry?.focus(); return; }
     player.value=name;
     state.pattern = (patternBEntry?.checked || patternB?.checked) ? 'B' : 'A';
     if(state.pattern==='B'){ patternB.checked=true; } else { patternA.checked=true; }
