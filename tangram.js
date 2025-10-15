@@ -10,8 +10,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const DILATE_PX = Math.max(4, Math.round(window.devicePixelRatio * 2));
 
   // === Sheets 送信設定（ココをあなたの環境に合わせる）===
-  const SHEETS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbxcva2qrDlBsbvuOkYOI1CF3CurxH31IO9yhvUILOgAcLJhJ1BnLqQp6mCUTb0QlhoJaQ/exec';
-  const SHEETS_TOKEN    = 'tangram_2'; // ← GAS側の TOKEN と同じに！
+  const SHEETS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbzC5tLGJlqn6U51wXDhrqppkRX-n2s4FkI6RDwFxvKe3yAM5xgFTfDjksYGE2Zl9KU/exec';
+  const SHEETS_TOKEN    = 'REPLACE_WITH_YOUR_TOKEN'; // ← GAS側の TOKEN と同じに！
 
   // 送信ユーティリティ（最小セット＋ prime_exposure_ms）
   function getDeviceCategory(){
