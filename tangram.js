@@ -1,14 +1,11 @@
-// Tangram AB + PRACTICE（練習モード付き）
-//  - AB の送信/集計は従来通り
-//  - 練習モードは送信なし＆リセット/開始画面へ戻る
-
+// Tangram AB + PRACTICE（三角形練習モード付き：送信なし）
 document.addEventListener('DOMContentLoaded', () => {
   const WORLD_W=1500, WORLD_H=900, SNAP=25;
   const CANVAS_Y_OFFSET = -60;
   const COUNT_STEP_MS=700, FLASH_MS=1000;
   const DILATE_PX = Math.max(4, Math.round(window.devicePixelRatio * 2));
 
-  // === Sheets 送信設定 ===
+  // === Sheets 送信設定（ABのみで使用／練習では未使用）===
   const SHEETS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbzC5tLGJlqn6U51wXDhrqppkRX-n2s4FkI6RDwFxvKe3yAM5xgFTfDjksYGE2Zl9KU/exec';
   const SHEETS_TOKEN    = 'REPLACE_WITH_YOUR_TOKEN'; // ← GAS側 TOKEN と一致させる
 
@@ -47,7 +44,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }catch(_){ return false; }
   }
 
-  // ===== 目標形 =====
+  // ===== A/B 目標形 =====
   const PUZZLES_A = [
     { title: "アヒル", target: [[482,394],[588,288],[800,288],[800,182],[906,182],[1012,182],[906,288],[906,394],[800,500],[588,500]] },
     { title: "凹み",   target: [[482,182],[588,182],[588,394],[800,394],[800,182],[906,182],[906,500],[482,500]] },
@@ -63,6 +60,17 @@ document.addEventListener('DOMContentLoaded', () => {
     { title: "魚",    target: [[482,288],[694,288],[588,182],[694,182],[906,394],[696,606],[588,606],[694,500],[482,500],[588,394]] },
   ];
 
+  // ===== 練習（三角形：rensyu.py と同じ） =====
+  const PRACTICE_PUZZLE = {
+    title: '練習（三角形）',
+    target: [
+      [606, 288],
+      [756, 138],
+      [906, 288],
+    ],
+  };
+
+  // ピース7種
   const PIECES=[
     [[0,0],[300,0],[150,150]],
     [[0,0],[0,300],[150,150]],
@@ -78,14 +86,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const $=id=>document.getElementById(id);
   const startScreen=$('startScreen'), playerEntry=$('playerEntry'),
         patternAEntry=$('patternAEntry'), patternBEntry=$('patternBEntry'),
-        practiceEntry=$('practiceEntry'); // ★ 練習
+        practiceEntry=$('practiceEntry');
   const primeScreen=$('primeScreen');
   const countScreen=$('countScreen'), countdownEl=$('countdown');
   const ui=$('ui'), stageWrap=$('stageWrap'), mobileCtrls=$('mobileControls');
   const player=$('player'), patternA=$('patternA'), patternB=$('patternB'),
         titleEl=$('puzzleTitle'), timerEl=$('timer');
   const saveBtn=$('saveLayoutBtn'), adminBadge=$('adminBadge');
-  const btnReset=$('practiceReset'), btnBack=$('practiceBack'); // ★ 練習
+  const btnReset=$('practiceReset'), btnBack=$('practiceBack');
 
   const ADMIN=location.search.includes('admin=1');
   if(ADMIN){ saveBtn.classList.remove('hidden'); adminBadge.classList.remove('hidden'); }
@@ -100,7 +108,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ===== 状態 =====
   const state={
-    mode:'ab', // ★ 'ab' or 'practice'
+    mode:'ab', // 'ab' or 'practice'
     pieces:[], selectedId:null, puzzleIndex:0,
     step:'home', results:[], elapsed:0, timerId:null, frozen:false,
     pattern:'A', lastPrimeExposureMs:0
@@ -129,8 +137,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function currentSets(){
     if (state.mode==='practice'){
-      // ★ 練習：とりあえず1問目（アヒル）で練習。必要ならここに別の練習配列を。
-      return { ACTIVE:[PUZZLES_A[0]], FLASH:[false] };
+      // 練習は三角形1面のみ（フラッシュなし）
+      return { ACTIVE: [PRACTICE_PUZZLE], FLASH: [false] };
     }
     if(state.pattern==='B'){
       return { ACTIVE: PUZZLES_B.concat(PUZZLES_A),
@@ -329,15 +337,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
     stop();
 
-    // ★ 練習はここで終了＆送信なし
+    // 練習はここで終了＆送信なし（すぐ続けて練習可）
     if (state.mode==='practice'){
       alert(`CLEAR!\n課題: ${ACTIVE[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
-      // 練習はそのまま続けられるようにリセット
       resetPieces(); resetTimer(); startTimer();
       return;
     }
 
-    // === AB：各試行を state.results に記録
+    // AB：記録
     const isPrime = !!FLASH[state.puzzleIndex];
     const record = {
       puzzleIndex: state.puzzleIndex + 1,
@@ -349,7 +356,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     state.results.push(record);
 
-    // === AB：各試行を即送信
+    // AB：即送信
     postToSheets(buildRowSingle({
       participant_id: (player.value||'').trim(),
       pattern: state.pattern,
@@ -371,7 +378,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.puzzleIndex++; setTitle(); resetPieces(); resetTimer();
       (isNextPrime() ? flashThen : (cb=>cb&&cb()))(()=>startTimer());
     }else{
-      // === 10問終了：合計算出 & まとめ送信
+      // 10問終了：合計算出 & まとめ送信
       const total = state.results.reduce((a,b)=>a + (b.timeSec||0), 0);
       const rows = state.results.map(r => buildRowPlain({
         participant_id: (player.value||'').trim(),
@@ -408,61 +415,55 @@ document.addEventListener('DOMContentLoaded', () => {
   // ====== 開始/プライム/練習フロー ======
   window.__startGo = function(){
     const name=(playerEntry?.value||'').trim();
-    if(!name && !practiceEntry?.checked){ // 練習時は名前不要
+    if(!name && !practiceEntry?.checked){
       alert('お名前（participant_id）を入力してください'); playerEntry?.focus(); return;
     }
     player.value=name || '';
 
-    // ★ 練習かどうか
     if (practiceEntry?.checked){
+      // 練習
       state.mode='practice';
       startScreen.classList.add('hidden');
       ui.classList.remove('hidden'); stageWrap.classList.remove('hidden'); mobileCtrls.classList.remove('hidden');
-
-      // 練習用 UI を表示
+      // 練習UI表示
       btnReset.classList.remove('hidden');
       btnBack.classList.remove('hidden');
-      // AB の内部ラジオは無効化
+      // AB ラジオ隠す
       patternA.parentElement.classList.add('hidden');
       patternB.parentElement.classList.add('hidden');
-
-      // 練習を開始
+      // スタート
       state.step='play'; state.results=[]; state.puzzleIndex=0;
       setTitle(); resetPieces(); resetTimer(); startTimer();
       return;
     }
 
-    // 通常 AB
+    // AB
     state.mode='ab';
     state.pattern = (patternBEntry?.checked || patternB?.checked) ? 'B' : 'A';
     if(state.pattern==='B'){ patternB.checked=true; } else { patternA.checked=true; }
     startScreen.classList.add('hidden');
     ui.classList.remove('hidden'); stageWrap.classList.remove('hidden'); mobileCtrls.classList.remove('hidden');
-
-    // 練習ボタンは隠す
+    // 練習ボタン隠す
     btnReset.classList.add('hidden');
     btnBack.classList.add('hidden');
     patternA.parentElement.classList.remove('hidden');
     patternB.parentElement.classList.remove('hidden');
-
     firstHalf();
   };
   window.__primeGo = function(){ primeScreen.classList.add('hidden'); secondHalf(); };
 
-  // ★ 練習：リセット
+  // 練習：リセット
   btnReset?.addEventListener('click', ()=>{
     if (state.mode!=='practice') return;
     resetPieces(); resetTimer(); startTimer();
   });
 
-  // ★ 練習：開始画面へ戻る
+  // 練習：開始画面へ戻る
   btnBack?.addEventListener('click', ()=>{
     if (state.mode!=='practice') return;
     stop();
-    // UI 戻す
     ui.classList.add('hidden'); stageWrap.classList.add('hidden'); mobileCtrls.classList.add('hidden');
     startScreen.classList.remove('hidden');
-    // 表示系初期化
     titleEl.textContent='—'; timerEl.textContent='00:00';
     state.step='home'; state.pieces=[]; state.selectedId=null;
   });
