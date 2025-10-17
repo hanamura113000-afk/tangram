@@ -10,8 +10,7 @@
     html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
     body{overscroll-behavior:none}
     .hidden{display:none!important}
-
-    /* ★ PCでスクロールさせない */
+    /* PCでスクロールさせない */
     html, body { overflow: hidden; }
 
     /* ツールバー */
@@ -100,7 +99,6 @@
         <strong>モード：</strong>
         <label><input type="radio" name="patternEntry" id="patternAEntry" value="A" checked> A（A通常5 → Bフラッシュ5）</label>
         <label><input type="radio" name="patternEntry" id="patternBEntry" value="B"> B（B通常5 → Aフラッシュ5）</label>
-        <!-- ★ 追加：練習（記録なし） -->
         <label><input type="radio" name="patternEntry" id="practiceEntry" value="practice"> 練習（記録なし）</label>
       </div>
       <div class="actions">
@@ -139,7 +137,7 @@
     <button id="start">開始</button>
     <button id="judge">判定</button>
 
-    <!-- ★ 追加：練習ボタン（練習モード時のみ表示） -->
+    <!-- 練習用：練習時のみ表示 -->
     <button id="practiceReset" class="hidden">リセット</button>
     <button id="practiceBack"  class="hidden">開始画面へ戻る</button>
 
