@@ -1,7 +1,6 @@
-// Tangram AB – 送信＆集計修正版
-// - 各試行ごとに即送信
-// - 終了時にまとめ送信＋TOTAL行
-// - 合計は state.results の合算で正確に
+// Tangram AB + PRACTICE（練習モード付き）
+//  - AB の送信/集計は従来通り
+//  - 練習モードは送信なし＆リセット/開始画面へ戻る
 
 document.addEventListener('DOMContentLoaded', () => {
   const WORLD_W=1500, WORLD_H=900, SNAP=25;
@@ -9,63 +8,46 @@ document.addEventListener('DOMContentLoaded', () => {
   const COUNT_STEP_MS=700, FLASH_MS=1000;
   const DILATE_PX = Math.max(4, Math.round(window.devicePixelRatio * 2));
 
-  // === Sheets 送信設定（ココをあなたの環境に合わせる）===
+  // === Sheets 送信設定 ===
   const SHEETS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbzC5tLGJlqn6U51wXDhrqppkRX-n2s4FkI6RDwFxvKe3yAM5xgFTfDjksYGE2Zl9KU/exec';
-  const SHEETS_TOKEN    = 'REPLACE_WITH_YOUR_TOKEN'; // ← GAS側の TOKEN と同じに！
+  const SHEETS_TOKEN    = 'REPLACE_WITH_YOUR_TOKEN'; // ← GAS側 TOKEN と一致させる
 
-  // 送信ユーティリティ（最小セット＋ prime_exposure_ms）
   function getDeviceCategory(){
     const ua = navigator.userAgent || '';
     if (/iPad|Android(?!.*Mobile)|Tablet/i.test(ua)) return 'tablet';
     if (/iPhone|Android.+Mobile|Windows Phone|iPod/i.test(ua)) return 'mobile';
     return 'pc';
   }
-  // 単発送信用（payload が1行）
   function buildRowSingle({ participant_id, pattern, block_index, condition, trial_index, puzzle_title, time_sec, prime_exposure_ms }) {
     return {
       token: SHEETS_TOKEN,
-      participant_id,
-      pattern,
-      block_index,
-      condition,
-      trial_index,
-      puzzle_title,
-      time_sec,
+      participant_id, pattern, block_index, condition, trial_index,
+      puzzle_title, time_sec,
       device_category: getDeviceCategory(),
       prime_exposure_ms
     };
   }
-  // まとめ送信用 rows（配列要素。tokenは外側にのみ入れる）
   function buildRowPlain({ participant_id, pattern, block_index, condition, trial_index, puzzle_title, time_sec, prime_exposure_ms }) {
     return {
-      participant_id,
-      pattern,
-      block_index,
-      condition,
-      trial_index,
-      puzzle_title,
-      time_sec,
+      participant_id, pattern, block_index, condition, trial_index,
+      puzzle_title, time_sec,
       device_category: getDeviceCategory(),
       prime_exposure_ms
     };
   }
   async function postToSheets(payload){
-    try {
-      console.log('[Sheets] post', payload);
-      await fetch(SHEETS_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        mode: 'no-cors',
-        body: JSON.stringify(payload)
+    try{
+      await fetch(SHEETS_ENDPOINT,{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        mode:'no-cors',
+        body:JSON.stringify(payload)
       });
       return true;
-    } catch (e) {
-      console.warn('[Sheets] post failed', e);
-      return false;
-    }
+    }catch(_){ return false; }
   }
 
-  // ===== 目標形（A/B） =====
+  // ===== 目標形 =====
   const PUZZLES_A = [
     { title: "アヒル", target: [[482,394],[588,288],[800,288],[800,182],[906,182],[1012,182],[906,288],[906,394],[800,500],[588,500]] },
     { title: "凹み",   target: [[482,182],[588,182],[588,394],[800,394],[800,182],[906,182],[906,500],[482,500]] },
@@ -81,7 +63,6 @@ document.addEventListener('DOMContentLoaded', () => {
     { title: "魚",    target: [[482,288],[694,288],[588,182],[694,182],[906,394],[696,606],[588,606],[694,500],[482,500],[588,394]] },
   ];
 
-  // ピース7種
   const PIECES=[
     [[0,0],[300,0],[150,150]],
     [[0,0],[0,300],[150,150]],
@@ -95,16 +76,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ===== DOM =====
   const $=id=>document.getElementById(id);
-  const startScreen=$('startScreen'), playerEntry=$('playerEntry'), patternAEntry=$('patternAEntry'), patternBEntry=$('patternBEntry');
+  const startScreen=$('startScreen'), playerEntry=$('playerEntry'),
+        patternAEntry=$('patternAEntry'), patternBEntry=$('patternBEntry'),
+        practiceEntry=$('practiceEntry'); // ★ 練習
   const primeScreen=$('primeScreen');
   const countScreen=$('countScreen'), countdownEl=$('countdown');
   const ui=$('ui'), stageWrap=$('stageWrap'), mobileCtrls=$('mobileControls');
-  const player=$('player'), patternA=$('patternA'), patternB=$('patternB'), titleEl=$('puzzleTitle'), timerEl=$('timer');
+  const player=$('player'), patternA=$('patternA'), patternB=$('patternB'),
+        titleEl=$('puzzleTitle'), timerEl=$('timer');
   const saveBtn=$('saveLayoutBtn'), adminBadge=$('adminBadge');
+  const btnReset=$('practiceReset'), btnBack=$('practiceBack'); // ★ 練習
+
   const ADMIN=location.search.includes('admin=1');
   if(ADMIN){ saveBtn.classList.remove('hidden'); adminBadge.classList.remove('hidden'); }
 
-  // ===== localStorage =====
+  // ===== localStorage（正解レイアウト保存） =====
   const LKEY='tangramLayouts_v1';
   let memStore={};
   const loadLs=()=>{ try{ return JSON.parse(localStorage.getItem(LKEY)||'{}'); }catch(_){ return {...memStore}; } };
@@ -114,6 +100,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ===== 状態 =====
   const state={
+    mode:'ab', // ★ 'ab' or 'practice'
     pieces:[], selectedId:null, puzzleIndex:0,
     step:'home', results:[], elapsed:0, timerId:null, frozen:false,
     pattern:'A', lastPrimeExposureMs:0
@@ -136,20 +123,15 @@ document.addEventListener('DOMContentLoaded', () => {
   const alphaCount=(k,w,h)=>{const d=k.getImageData(0,0,w,h).data;let c=0;for(let i=3;i<d.length;i+=4){if(d[i]!==0)c++;}return c;}
 
   function drawDil(k, pts, px){
-    drawPath(k, pts);
-    k.fillStyle = '#000';
-    k.fill();
-    if (px > 0) {
-      k.lineWidth = px * 2 + 1;
-      k.lineJoin  = 'round';
-      k.lineCap   = 'round';
-      k.miterLimit= 2;
-      k.strokeStyle = '#000';
-      k.stroke();
-    }
+    drawPath(k, pts); k.fillStyle='#000'; k.fill();
+    if (px > 0){ k.lineWidth = px*2+1; k.lineJoin='round'; k.lineCap='round'; k.miterLimit=2; k.strokeStyle='#000'; k.stroke(); }
   }
 
   function currentSets(){
+    if (state.mode==='practice'){
+      // ★ 練習：とりあえず1問目（アヒル）で練習。必要ならここに別の練習配列を。
+      return { ACTIVE:[PUZZLES_A[0]], FLASH:[false] };
+    }
     if(state.pattern==='B'){
       return { ACTIVE: PUZZLES_B.concat(PUZZLES_A),
                FLASH:  [...new Array(PUZZLES_B.length).fill(false), ...new Array(PUZZLES_A.length).fill(true)] };
@@ -227,8 +209,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let startAt=0; const upd=()=>{ if(timerEl) timerEl.textContent = fmt(state.elapsed); };
   const stop=()=>{ if(state.timerId){ clearInterval(state.timerId); state.timerId=null; } };
-  const reset=()=>{ stop(); state.elapsed=0; upd(); };
-  const start=()=>{ stop(); startAt=Date.now(); state.timerId=setInterval(()=>{ state.elapsed=Math.floor((Date.now()-startAt)/1000); upd(); },500); };
+  const resetTimer=()=>{ stop(); state.elapsed=0; upd(); };
+  const startTimer=()=>{ stop(); startAt=Date.now(); state.timerId=setInterval(()=>{ state.elapsed=Math.floor((Date.now()-startAt)/1000); upd(); },500); };
   const setTitle=()=>{ const {ACTIVE}=currentSets(); if(titleEl) titleEl.textContent=ACTIVE[state.puzzleIndex].title; };
 
   const wait=ms=>new Promise(r=>setTimeout(r,ms));
@@ -328,17 +310,17 @@ document.addEventListener('DOMContentLoaded', () => {
     return {ok:true};
   }
 
-  // 進行
+  // ========== 進行 ==========
   $('start')?.addEventListener('click',()=>{ if(state.step==='home') firstHalf(); });
   $('judge')?.addEventListener('click',onJudge);
 
   function firstHalf(){
     state.step='play'; state.results=[]; state.puzzleIndex=0;
-    setTitle(); resetPieces(); reset(); start();
+    setTitle(); resetPieces(); resetTimer(); startTimer();
   }
   function secondHalf(){
-    state.step='play'; state.puzzleIndex=5; setTitle(); resetPieces(); reset();
-    flashThen(()=>start());
+    state.step='play'; state.puzzleIndex=5; setTitle(); resetPieces(); resetTimer();
+    flashThen(()=>startTimer());
   }
 
   // 判定→記録→送信→遷移
@@ -347,7 +329,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
     stop();
 
-    // === ここで毎試行を state.results に記録 ===
+    // ★ 練習はここで終了＆送信なし
+    if (state.mode==='practice'){
+      alert(`CLEAR!\n課題: ${ACTIVE[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
+      // 練習はそのまま続けられるようにリセット
+      resetPieces(); resetTimer(); startTimer();
+      return;
+    }
+
+    // === AB：各試行を state.results に記録
     const isPrime = !!FLASH[state.puzzleIndex];
     const record = {
       puzzleIndex: state.puzzleIndex + 1,
@@ -359,7 +349,7 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     state.results.push(record);
 
-    // === 各試行を即送信（図形ごとのタイムを確実に残す） ===
+    // === AB：各試行を即送信
     postToSheets(buildRowSingle({
       participant_id: (player.value||'').trim(),
       pattern: state.pattern,
@@ -378,10 +368,10 @@ document.addEventListener('DOMContentLoaded', () => {
       state.step='prime'; primeScreen.classList.remove('hidden'); return;
     }
     if(state.puzzleIndex< (currentSets().ACTIVE.length - 1) ){
-      state.puzzleIndex++; setTitle(); resetPieces(); reset();
-      (isNextPrime() ? flashThen : (cb=>cb&&cb()))(()=>start());
+      state.puzzleIndex++; setTitle(); resetPieces(); resetTimer();
+      (isNextPrime() ? flashThen : (cb=>cb&&cb()))(()=>startTimer());
     }else{
-      // === 10問終了：合計算出 & まとめ送信（TOTAL行付き） ===
+      // === 10問終了：合計算出 & まとめ送信
       const total = state.results.reduce((a,b)=>a + (b.timeSec||0), 0);
       const rows = state.results.map(r => buildRowPlain({
         participant_id: (player.value||'').trim(),
@@ -393,7 +383,6 @@ document.addEventListener('DOMContentLoaded', () => {
         time_sec: r.timeSec,
         prime_exposure_ms: r.primeExposureMs
       }));
-      // TOTAL行（condition='summary', trial_index=0）
       rows.push(buildRowPlain({
         participant_id: (player.value||'').trim(),
         pattern: state.pattern,
@@ -413,24 +402,73 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function isNextPrime(){
     const {FLASH}=currentSets();
-    return FLASH[state.puzzleIndex]; // onJudge後に+1する前のインデックスを使って、次を判断
+    return FLASH[state.puzzleIndex];
   }
 
-  // 開始/プライム
+  // ====== 開始/プライム/練習フロー ======
   window.__startGo = function(){
     const name=(playerEntry?.value||'').trim();
-    if(!name){ alert('お名前（participant_id）を入力してください'); playerEntry?.focus(); return; }
-    player.value=name;
+    if(!name && !practiceEntry?.checked){ // 練習時は名前不要
+      alert('お名前（participant_id）を入力してください'); playerEntry?.focus(); return;
+    }
+    player.value=name || '';
+
+    // ★ 練習かどうか
+    if (practiceEntry?.checked){
+      state.mode='practice';
+      startScreen.classList.add('hidden');
+      ui.classList.remove('hidden'); stageWrap.classList.remove('hidden'); mobileCtrls.classList.remove('hidden');
+
+      // 練習用 UI を表示
+      btnReset.classList.remove('hidden');
+      btnBack.classList.remove('hidden');
+      // AB の内部ラジオは無効化
+      patternA.parentElement.classList.add('hidden');
+      patternB.parentElement.classList.add('hidden');
+
+      // 練習を開始
+      state.step='play'; state.results=[]; state.puzzleIndex=0;
+      setTitle(); resetPieces(); resetTimer(); startTimer();
+      return;
+    }
+
+    // 通常 AB
+    state.mode='ab';
     state.pattern = (patternBEntry?.checked || patternB?.checked) ? 'B' : 'A';
     if(state.pattern==='B'){ patternB.checked=true; } else { patternA.checked=true; }
     startScreen.classList.add('hidden');
     ui.classList.remove('hidden'); stageWrap.classList.remove('hidden'); mobileCtrls.classList.remove('hidden');
+
+    // 練習ボタンは隠す
+    btnReset.classList.add('hidden');
+    btnBack.classList.add('hidden');
+    patternA.parentElement.classList.remove('hidden');
+    patternB.parentElement.classList.remove('hidden');
+
     firstHalf();
   };
   window.__primeGo = function(){ primeScreen.classList.add('hidden'); secondHalf(); };
 
+  // ★ 練習：リセット
+  btnReset?.addEventListener('click', ()=>{
+    if (state.mode!=='practice') return;
+    resetPieces(); resetTimer(); startTimer();
+  });
+
+  // ★ 練習：開始画面へ戻る
+  btnBack?.addEventListener('click', ()=>{
+    if (state.mode!=='practice') return;
+    stop();
+    // UI 戻す
+    ui.classList.add('hidden'); stageWrap.classList.add('hidden'); mobileCtrls.classList.add('hidden');
+    startScreen.classList.remove('hidden');
+    // 表示系初期化
+    titleEl.textContent='—'; timerEl.textContent='00:00';
+    state.step='home'; state.pieces=[]; state.selectedId=null;
+  });
+
   // 初期表示
   ui.classList.add('hidden'); stageWrap.classList.add('hidden'); mobileCtrls.classList.add('hidden');
-  if(timerEl) timerEl.textContent='00:00';
+  timerEl.textContent='00:00';
   const {ACTIVE}=currentSets(); titleEl.textContent = (ACTIVE[0]?.title || '—');
 });
