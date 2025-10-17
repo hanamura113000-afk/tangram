@@ -100,9 +100,10 @@
         <strong>モード：</strong>
         <label><input type="radio" name="patternEntry" id="patternAEntry" value="A" checked> A（A通常5 → Bフラッシュ5）</label>
         <label><input type="radio" name="patternEntry" id="patternBEntry" value="B"> B（B通常5 → Aフラッシュ5）</label>
+        <!-- ★ 追加：練習（記録なし） -->
+        <label><input type="radio" name="patternEntry" id="practiceEntry" value="practice"> 練習（記録なし）</label>
       </div>
       <div class="actions">
-        <!-- フォールバック：JSが壊れても起動 -->
         <button id="startGo" class="primary" onclick="window.__startGo && window.__startGo()">開始</button>
       </div>
     </div>
@@ -111,7 +112,7 @@
   <!-- 中間：プライミングありver -->
   <div id="primeScreen" class="screen hidden">
     <div class="card">
-      <div class="title">プライミングあり ver</div>
+      <div class="タイトル">プライミングあり ver</div>
       <p style="margin:8px 0 14px; line-height:1.6">
         これからの5問は、<br>
         <strong>開始前に「正解レイアウト」を1秒だけ表示</strong>します。<br>
@@ -137,6 +138,10 @@
 
     <button id="start">開始</button>
     <button id="judge">判定</button>
+
+    <!-- ★ 追加：練習ボタン（練習モード時のみ表示） -->
+    <button id="practiceReset" class="hidden">リセット</button>
+    <button id="practiceBack"  class="hidden">開始画面へ戻る</button>
 
     <span> / 現在：<strong id="puzzleTitle">—</strong></span>
     <div id="timer">00:00</div>
