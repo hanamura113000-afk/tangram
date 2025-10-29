@@ -80,7 +80,7 @@
 </head>
 <body>
 
-  <!-- 開始画面 -->
+  <!-- スタート画面 -->
   <div id="startScreen" class="screen">
     <div class="card">
       <div class="title">タングラムパズル</div>
@@ -96,7 +96,7 @@
         <label><input type="radio" name="patternEntry" id="practiceEntry" value="practice"> 練習（記録なし）</label>
       </div>
       <div class="actions">
-        <button id="startGo" class="primary" onclick="window.__startGo && window.__startGo()">開始</button>
+        <button id="startGo" class="primary" onclick="window.__startGo()">開始</button>
       </div>
     </div>
   </div>
@@ -106,12 +106,12 @@
     <div class="card">
       <div class="title">練習について</div>
       <p style="line-height:1.8">
-        まずは通常の練習問題（正解の一瞬表示なし）を1問プレイします。<br>
+        これから<strong>通常の練習問題</strong>を1問プレイします（正解の一瞬表示なし）。<br>
         ピースはドラッグ、回転は <b>R</b>、反転は <b>F</b> または下のボタンで行えます。<br>
-        クリア後、続いて「1秒だけ正解レイアウトを表示する」練習を行います。
+        クリア後、<b>1秒だけ正解を表示</b>する練習を行います。
       </p>
       <div class="actions">
-        <button class="primary" onclick="window.__practiceIntroGo && window.__practiceIntroGo()">練習を開始</button>
+        <button class="primary" onclick="window.__practiceIntroGo()">練習を開始</button>
       </div>
     </div>
   </div>
@@ -125,12 +125,12 @@
         表示が消えたら、できるだけ早く同じ形に組み立ててください。
       </p>
       <div class="actions">
-        <button class="primary" onclick="window.__practiceFlashGo && window.__practiceFlashGo()">開始</button>
+        <button class="primary" onclick="window.__practiceFlashGo()">開始</button>
       </div>
     </div>
   </div>
 
-  <!-- 中間：本番用プライミング案内（A/B用に既存維持） -->
+  <!-- A/B用：プライミング案内（既存維持） -->
   <div id="primeScreen" class="screen hidden">
     <div class="card">
       <div class="title">プライミングあり ver</div>
@@ -140,7 +140,7 @@
         準備ができたら「開始」を押してください。
       </p>
       <div class="actions">
-        <button id="primeGo" class="primary" onclick="window.__primeGo && window.__primeGo()">開始</button>
+        <button id="primeGo" class="primary" onclick="window.__primeGo()">開始</button>
       </div>
     </div>
   </div>
