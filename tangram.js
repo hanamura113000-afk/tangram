@@ -1,5 +1,4 @@
 // Tangram AB + PRACTICE（二段階：①答えなし → ②答えあり、送信なし）
-// 勝手にカウントダウンが始まらないよう allowFlash ガードを追加
 document.addEventListener('DOMContentLoaded', () => {
   const WORLD_W=1500, WORLD_H=900, SNAP=25;
   const CANVAS_Y_OFFSET = -60;
@@ -118,8 +117,7 @@ document.addEventListener('DOMContentLoaded', () => {
     practicePhase: 1,     // 1:答えなし → 2:答えあり
     pieces:[], selectedId:null, puzzleIndex:0,
     step:'home', results:[], elapsed:0, timerId:null, frozen:false,
-    pattern:'A', lastPrimeExposureMs:0,
-    allowFlash:false      // ★ フラッシュ許可フラグ（これが true の時のみ flashThen 実行）
+    pattern:'A', lastPrimeExposureMs:0
   };
 
   // ===== Canvas & Utils =====
@@ -143,7 +141,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (px > 0){ k.lineWidth = px*2+1; k.lineJoin='round'; k.lineCap='round'; k.miterLimit=2; k.strokeStyle='#000'; k.stroke(); }
   }
 
-  // セット取得（練習は三角形固定、フェーズ2のみフラッシュ候補）
+  // セット取得（練習は三角形固定、フェーズ2のみフラッシュ）
   function currentSets(){
     if (state.mode==='practice'){
       return { ACTIVE: [PRACTICE_PUZZLE], FLASH: [state.practicePhase===2] };
@@ -236,9 +234,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const nextFrame = () => new Promise(r => requestAnimationFrame(() => r()));
 
   async function flashThen(cb){
-    // ★ 許可されていないときは何もしない
-    if (!state.allowFlash){ cb?.(); return; }
-
     await countdown3();
     const {ACTIVE}=currentSets();
     const rec=getLayout(ACTIVE[state.puzzleIndex].title);
@@ -258,7 +253,6 @@ document.addEventListener('DOMContentLoaded', () => {
     await nextFrame(); const t1=performance.now();
     state.lastPrimeExposureMs = Math.round(t1 - t0);
     state.frozen=false;
-
     cb?.();
   }
 
@@ -279,8 +273,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const tgt=roundPts(ACTIVE[state.puzzleIndex].target);
     const polys=state.pieces.map(p=> roundPts(transform(p.shape,p.offset,p.angle,p.flipped)) );
 
-    // バッファを都度クリア（Yオフセットを考慮）
-    [ctxT, ctxU, ctxUd, ctxX].forEach(k=>k.clearRect(0,0,WORLD_W,WORLD_H));
+    ctxT.clearRect(0,0,WORLD_W,WORLD_H);
+    ctxU.clearRect(0,0,WORLD_W,WORLD_H);
+    ctxUd.clearRect(0,0,WORLD_W,WORLD_H);
+    ctxX.clearRect(0,0,WORLD_W,WORLD_H);
+
     [ctxT, ctxU, ctxUd].forEach(k=>{ k.save(); k.translate(0, CANVAS_Y_OFFSET); });
 
     const px = DILATE_PX;
@@ -337,23 +334,18 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function secondHalf(){
     state.step='play'; state.puzzleIndex=5; setTitle(); resetPieces(); resetTimer();
-    // AB のフラッシュだけ許可
-    state.allowFlash = true;
-    flashThen(()=>{ state.allowFlash=false; startTimer(); });
+    flashThen(()=>startTimer());
   }
 
   // 判定→記録/送信→遷移（★練習1はフラッシュせず説明へ）
   async function onJudge(){
     const {ACTIVE, FLASH}=currentSets();
 
-    // === 練習：ステージ1（答えなし）→ フラッシュしないで説明へ
+    // === 練習：ステージ1（答えなし）→ ここではフラッシュしない
     if (state.mode==='practice' && state.practicePhase===1){
       const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
-      stop();
-      // 念のため準備（勝手に動かないようフラッシュ禁止＆リセット）
-      state.allowFlash = false;
-      resetPieces(); resetTimer();
-      await showOverlay(practicePrimeScreen); // ステージ2の説明
+      stop(); // 計測停止
+      await showOverlay(practicePrimeScreen); // ステージ2の説明へ
       state.step='practicePrimeWait';
       return;
     }
@@ -400,13 +392,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if(state.puzzleIndex< (currentSets().ACTIVE.length - 1) ){
       state.puzzleIndex++; setTitle(); resetPieces(); resetTimer();
-      // 次がプライムのときのみ許可してフラッシュ
-      if (isNextPrime()){
-        state.allowFlash = true;
-        flashThen(()=>{ state.allowFlash=false; startTimer(); });
-      } else {
-        startTimer();
-      }
+      (isNextPrime() ? flashThen : (cb=>cb&&cb()))(()=>startTimer());
     }else{
       const total = state.results.reduce((a,b)=>a + (b.timeSec||0), 0);
       const rows = state.results.map(r => buildRowPlain({
@@ -449,7 +435,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (practiceEntry?.checked){
       state.mode='practice';
       state.practicePhase=1;
-      state.allowFlash=false; // 念のため禁止
       player.value = name || '';
       startScreen.classList.add('hidden');
       practiceIntro.classList.remove('hidden'); // 説明画面
@@ -480,14 +465,14 @@ document.addEventListener('DOMContentLoaded', () => {
   // 練習：説明 → ステージ1開始（答えなし）
   window.__practiceIntroGo = function(){
     practiceIntro.classList.add('hidden');
+    // UI 表示
     ui.classList.remove('hidden'); stageWrap.classList.remove('hidden'); mobileCtrls.classList.remove('hidden');
-
-    btnBack.classList.add('hidden');    // ステージ1は戻るなし
+    // ステージ1は「戻る」を隠し、リセットは表示
+    btnBack.classList.add('hidden');
     btnReset.classList.remove('hidden');
     patternA.parentElement.classList.add('hidden');
     patternB.parentElement.classList.add('hidden');
 
-    state.allowFlash=false;             // 念のため禁止
     state.step='play'; state.results=[]; state.puzzleIndex=0;
     setTitle(); resetPieces(); resetTimer(); startTimer();
   };
@@ -496,21 +481,17 @@ document.addEventListener('DOMContentLoaded', () => {
   window.__practicePrimeGo = async function(){
     practicePrimeScreen.classList.add('hidden');
     state.practicePhase = 2; // フェーズ2へ
-
-    btnBack.classList.remove('hidden'); // ステージ2は戻るOK
+    // ステージ2では「戻る」を表示OK
+    btnBack.classList.remove('hidden');
     btnReset.classList.remove('hidden');
 
-    // 先に答えを 1 秒フラッシュしてから計測開始
+    // 再セット → 先に答えを 1 秒フラッシュしてから計測開始
     setTitle(); resetPieces(); resetTimer();
-    state.allowFlash = true;            // ★ ここでのみ許可
-    await flashThen(()=>{ state.allowFlash=false; startTimer(); });
+    await flashThen(()=>startTimer());
     state.step='play';
   };
 
-  window.__primeGo = function(){
-    primeScreen.classList.add('hidden');
-    secondHalf();
-  };
+  window.__primeGo = function(){ primeScreen.classList.add('hidden'); secondHalf(); };
 
   // 練習：リセット/戻る
   btnReset?.addEventListener('click', ()=>{
@@ -524,7 +505,6 @@ document.addEventListener('DOMContentLoaded', () => {
     startScreen.classList.remove('hidden');
     titleEl.textContent='—'; timerEl.textContent='00:00';
     state.step='home'; state.pieces=[]; state.selectedId=null;
-    state.allowFlash=false;
   });
 
   // 初期表示
