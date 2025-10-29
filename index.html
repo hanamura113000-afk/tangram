@@ -10,8 +10,10 @@
     html,body{height:100%;margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
     body{overscroll-behavior:none}
     .hidden{display:none!important}
+    /* PCでスクロールさせない */
     html, body { overflow: hidden; }
 
+    /* ツールバー */
     #ui{ position:sticky; top:0; z-index:10; background:var(--panel);
          padding:8px 10px; border-bottom:1px solid #e5e7eb;
          display:flex; flex-wrap:wrap; gap:8px; align-items:center }
@@ -19,6 +21,7 @@
     #ui label{ border:none; background:transparent; padding:0 4px }
     #timer{font-weight:700; margin-left:4px}
 
+    /* キャンバス */
     .stage{padding:10px}
     canvas{
       display:block; width:100%; height:auto; aspect-ratio:1500/900;
@@ -31,6 +34,7 @@
       canvas{ width:100vw; height:auto; aspect-ratio:1500/900 }
     }
 
+    /* スマホ操作 */
     .mobile-controls{
       position:fixed; left:50%; bottom:16px; transform:translateX(-50%);
       display:none; gap:12px; z-index:50;
@@ -45,6 +49,7 @@
       .mobile-controls{ display:flex; padding-bottom:max(12px, env(safe-area-inset-bottom)) }
     }
 
+    /* フルスクリーン画面（開始/プライミング/カウントダウン） */
     .screen{
       position:fixed; inset:0;
       display:flex; align-items:center; justify-content:center;
@@ -63,6 +68,7 @@
     .actions{ margin-top:18px }
     .primary{ font-size:18px; font-weight:800; padding:12px 22px; border-radius:12px; border:1px solid #0ea5e9; background:#0284c7; color:#fff }
 
+    /* カウントダウン */
     #countScreen{ background:#0b1020; color:#e5e7eb }
     #countdown{
       font-weight:900; font-variation-settings:"wght" 900;
@@ -70,6 +76,7 @@
       color:#ffffff; text-shadow:0 6px 24px rgba(0,0,0,.45); user-select:none
     }
 
+    /* 管理者バッジ */
     #adminBadge{
       position:fixed; right:10px; bottom:10px; z-index:60;
       background:#0ea5e9; color:#fff; border-radius:999px; padding:6px 10px;
@@ -79,7 +86,6 @@
 </head>
 <body>
 
-  <!-- 開始画面 -->
   <div id="startScreen" class="screen">
     <div class="card">
       <div class="title">タングラムパズル</div>
@@ -100,27 +106,9 @@
     </div>
   </div>
 
-  <!-- 練習：説明画面 -->
-  <div id="practiceIntro" class="screen hidden">
-    <div class="card">
-      <div class="title">練習モード</div>
-      <p style="margin:8px 0 14px; line-height:1.7">
-        練習は <strong>2 段階</strong>です。<br>
-        ① 最初は <strong>答えを表示しない</strong> で練習します。<br>
-        ② 次に <strong>答えを 1 秒だけ表示</strong> してから練習します。<br><br>
-        練習の記録は <strong>スプレッドシートに保存されません</strong>。<br>
-        （三角形の枠にピースをぴったり入れてください）
-      </p>
-      <div class="actions">
-        <button id="practiceIntroGo" class="primary" onclick="window.__practiceIntroGo && window.__practiceIntroGo()">練習を始める</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 本番用：プライミングありver（既存） -->
   <div id="primeScreen" class="screen hidden">
     <div class="card">
-      <div class="title">プライミングあり ver</div>
+      <div class="タイトル">プライミングあり ver</div>
       <p style="margin:8px 0 14px; line-height:1.6">
         これからの5問は、<br>
         <strong>開始前に「正解レイアウト」を1秒だけ表示</strong>します。<br>
@@ -132,26 +120,10 @@
     </div>
   </div>
 
-  <!-- 練習：ステージ2（答え表示あり）への案内 -->
-  <div id="practicePrimeScreen" class="screen hidden">
-    <div class="card">
-      <div class="title">練習（答え表示あり）</div>
-      <p style="margin:8px 0 14px; line-height:1.6">
-        これからは<strong>開始前に正解レイアウトを 1 秒だけ表示</strong>してから練習します。<br>
-        準備ができたら「開始」を押してください。
-      </p>
-      <div class="actions">
-        <button id="practicePrimeGo" class="primary" onclick="window.__practicePrimeGo && window.__practicePrimeGo()">開始</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- カウントダウン -->
-  <div id="countScreen" class="screen hidden" aria-live="polite">
+  <div id="countScreen" class"screen hidden" aria-live="polite">
     <div id="countdown">3</div>
   </div>
 
-  <!-- ゲームUI -->
   <div id="ui" class="hidden">
     名前：<input id="player" type="text" />
     <label>モード：</label>
@@ -161,7 +133,6 @@
     <button id="start">開始</button>
     <button id="judge">判定</button>
 
-    <!-- 練習用 -->
     <button id="practiceReset" class="hidden">リセット</button>
     <button id="practiceBack"  class="hidden">開始画面へ戻る</button>
 
@@ -176,7 +147,6 @@
     <canvas id="game" width="1500" height="900"></canvas>
   </div>
 
-  <!-- スマホ用操作 -->
   <div class="mobile-controls hidden" id="mobileControls" aria-label="モバイル操作">
     <button id="rotateMobile" type="button">回転 (R)</button>
     <button id="flipMobile"  type="button">反転 (F)</button>
