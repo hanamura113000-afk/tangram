@@ -1,4 +1,4 @@
-// Tangram AB + PRACTICE（三角形練習モード：送信なし／練習時は判定ゆるめ）
+// Tangram AB + PRACTICE（三角形練習モード：送信なし／練習は枠外NGを無効化）
 document.addEventListener('DOMContentLoaded', () => {
   const WORLD_W=1500, WORLD_H=900, SNAP=25;
   const CANVAS_Y_OFFSET = -60;
@@ -15,41 +15,32 @@ document.addEventListener('DOMContentLoaded', () => {
     if (/iPhone|Android.+Mobile|Windows Phone|iPod/i.test(ua)) return 'mobile';
     return 'pc';
   }
-  function buildRowSingle(d){
-    return {
-      token: SHEETS_TOKEN,
-      participant_id: d.participant_id,
-      pattern: d.pattern,
-      block_index: d.block_index,
-      condition: d.condition,
-      trial_index: d.trial_index,
-      puzzle_title: d.puzzle_title,
-      time_sec: d.time_sec,
-      device_category: getDeviceCategory(),
-      prime_exposure_ms: d.prime_exposure_ms
-    };
-  }
-  function buildRowPlain(d){
-    return {
-      participant_id: d.participant_id,
-      pattern: d.pattern,
-      block_index: d.block_index,
-      condition: d.condition,
-      trial_index: d.trial_index,
-      puzzle_title: d.puzzle_title,
-      time_sec: d.time_sec,
-      device_category: getDeviceCategory(),
-      prime_exposure_ms: d.prime_exposure_ms
-    };
-  }
+  const buildRowSingle = d => ({
+    token: SHEETS_TOKEN,
+    participant_id: d.participant_id,
+    pattern: d.pattern,
+    block_index: d.block_index,
+    condition: d.condition,
+    trial_index: d.trial_index,
+    puzzle_title: d.puzzle_title,
+    time_sec: d.time_sec,
+    device_category: getDeviceCategory(),
+    prime_exposure_ms: d.prime_exposure_ms
+  });
+  const buildRowPlain = d => ({
+    participant_id: d.participant_id,
+    pattern: d.pattern,
+    block_index: d.block_index,
+    condition: d.condition,
+    trial_index: d.trial_index,
+    puzzle_title: d.puzzle_title,
+    time_sec: d.time_sec,
+    device_category: getDeviceCategory(),
+    prime_exposure_ms: d.prime_exposure_ms
+  });
   async function postToSheets(payload){
     try{
-      await fetch(SHEETS_ENDPOINT,{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        mode:'no-cors',
-        body:JSON.stringify(payload)
-      });
+      await fetch(SHEETS_ENDPOINT,{ method:'POST', headers:{'Content-Type':'application/json'}, mode:'no-cors', body:JSON.stringify(payload) });
       return true;
     }catch(_){ return false; }
   }
@@ -70,7 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
     { title: "魚",    target: [[482,288],[694,288],[588,182],[694,182],[906,394],[696,606],[588,606],[694,500],[482,500],[588,394]] },
   ];
 
-  // ===== 練習（三角形） =====
+  // ===== 練習（三角形：rensyu.py と同じ座標） =====
   const PRACTICE_PUZZLE = {
     title: '練習（三角形）',
     target: [
@@ -272,7 +263,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('keydown',e=>{ if(e.altKey&&(e.key==='s'||e.key==='S')) saveAnswer(); });
   }
 
-  // ===== 判定：練習モードだけ“超ゆるめ”しきい値に変更 =====
+  // ===== 判定 =====
   function judge(){
     const {ACTIVE}=currentSets();
     const tgt=roundPts(ACTIVE[state.puzzleIndex].target);
@@ -293,39 +284,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const targetArea = alphaCount(ctxT, WORLD_W, WORLD_H);
 
-    // ★ 練習かどうかで閾値を切り替え
+    // 練習かどうか
     const isPractice = (state.mode==='practice' || state.pattern==='practice');
+
+    // しきい値（本番は従来、練習はゆるめ）
     const dpr = (window.devicePixelRatio||1);
-
-    // 本番：従来のしきい値
-    let AREA_TOL_COEF = 0.0035;      // 0.35%
-    let EDGE_PAD_PX   = 12 * dpr;    // 12px * DPR
-    let OUT_TOL_RATE  = 0.004;       // 0.40%
-    let OUT_TOL_ABS_K = 1.00;        // 絶対量の倍率
-
-    // 練習：かなり緩め
-    if (isPractice){
-      AREA_TOL_COEF = 0.012;         // 1.2% までギャップ/重なり許容
-      EDGE_PAD_PX   = 18 * dpr;      // 端のはみ出しは広めに吸収
-      OUT_TOL_RATE  = 0.010;         // 1.0% まで“枠外”の比率許容
-      OUT_TOL_ABS_K = 2.50;          // 絶対量もしっかり増やす
-    }
-
+    const AREA_TOL_COEF = isPractice ? 0.012 : 0.0035;   // ギャップ/重なり許容
+    const EDGE_PAD_PX   = isPractice ? 22*dpr : 12*dpr;  // 目標の膨張（外側緩衝）
     const AREA_TOL   = Math.max(5000, Math.round(targetArea * AREA_TOL_COEF));
-    const OUT_TOL    = Math.round(AREA_TOL * 0.5);
 
-    // 外側：ピース合成 − （ターゲット＋余白）
+    // --- outside（枠外）計算 ---
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
-    ctxX.drawImage(cU,0,0);
+    ctxX.drawImage(cU,0,0);                        // ピース合成
     ctxX.globalCompositeOperation='destination-out';
-    ctxX.save();
-    ctxX.translate(0, CANVAS_Y_OFFSET);
-    drawDil(ctxX, tgt, Math.max(tolTarget, EDGE_PAD_PX));
+    ctxX.save(); ctxX.translate(0, CANVAS_Y_OFFSET);
+    drawDil(ctxX, tgt, Math.max(tolTarget, EDGE_PAD_PX)); // 目標＋緩衝
     ctxX.restore();
     ctxX.globalCompositeOperation='source-over';
     const outside = alphaCount(ctxX,WORLD_W,WORLD_H);
 
-    // ギャップ：ターゲット − 膨張ピース
+    // --- gaps（隙間） ---
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.drawImage(cT,0,0);
     ctxX.globalCompositeOperation='destination-out';
@@ -333,7 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
     ctxX.globalCompositeOperation='source-over';
     const gaps = alphaCount(ctxX,WORLD_W,WORLD_H);
 
-    // 重なり：各ピース合算 − 和集合
+    // --- overlap（重なり） ---
     const unionArea = alphaCount(ctxU, WORLD_W, WORLD_H);
     let sum=0;
     for(const pl of polys){
@@ -344,12 +322,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const overlap = Math.max(0, sum - unionArea);
 
-    // 外側は「絶対量」かつ「比率」の両方で見て、両方を超えたらNG
-    const OUT_TOL_ABS = Math.max(20000, Math.round(AREA_TOL * 1.25 * OUT_TOL_ABS_K));
-    const outsideRate = outside / Math.max(1, targetArea);
-    if (outside > OUT_TOL_ABS && outsideRate > OUT_TOL_RATE) {
-      return {ok:false,reason:'枠外に出ています。'};
+    // ===== 判定方針 =====
+    // 練習：枠外チェックは無効化（= outside を見ない）
+    // → 三角形ターゲットは踏襲しつつ、はみ出しでNGにしない
+    if (!isPractice){
+      const OUT_TOL_ABS = Math.max(20000, Math.round(AREA_TOL * 1.25));
+      const OUT_TOL_RATE = 0.004; // 0.4%
+      const outsideRate = outside / Math.max(1, targetArea);
+      if (outside > OUT_TOL_ABS && outsideRate > OUT_TOL_RATE) {
+        return {ok:false,reason:'枠外に出ています。'};
+      }
     }
+
     if (overlap > AREA_TOL) return {ok:false,reason:'ピースが重なっています。'};
     if (gaps    > AREA_TOL) return {ok:false,reason:'隙間があります。'};
     return {ok:true};
