@@ -1,4 +1,4 @@
-// Tangram AB + PRACTICE（三角形練習モード：送信なし）
+// Tangram AB + PRACTICE（三角形練習モード：送信なし／練習時は判定ゆるめ）
 document.addEventListener('DOMContentLoaded', () => {
   const WORLD_W=1500, WORLD_H=900, SNAP=25;
   const CANVAS_Y_OFFSET = -60;
@@ -145,7 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (px > 0){ k.lineWidth = px*2+1; k.lineJoin='round'; k.lineCap='round'; k.miterLimit=2; k.strokeStyle='#000'; k.stroke(); }
   }
 
-  // ===★ ここがポイント：練習は必ず三角形を返す（mode でも pattern でも可） ===
+  // === セット選択：練習は三角形固定 ===
   function currentSets(){
     if (state.mode==='practice' || state.pattern==='practice'){
       return { ACTIVE: [PRACTICE_PUZZLE], FLASH: [false] };
@@ -272,39 +272,60 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('keydown',e=>{ if(e.altKey&&(e.key==='s'||e.key==='S')) saveAnswer(); });
   }
 
+  // ===== 判定：練習モードだけ“超ゆるめ”しきい値に変更 =====
   function judge(){
     const {ACTIVE}=currentSets();
     const tgt=roundPts(ACTIVE[state.puzzleIndex].target);
     const polys=state.pieces.map(p=> roundPts(transform(p.shape,p.offset,p.angle,p.flipped)) );
 
-    ctxT.clearRect(0,0,WORLD_W,WORLD_H);
-    ctxU.clearRect(0,0,WORLD_W,WORLD_H);
-    ctxUd.clearRect(0,0,WORLD_W,WORLD_H);
-    ctxX.clearRect(0,0,WORLD_W,WORLD_H);
-
+    [ctxT, ctxU, ctxUd, ctxX].forEach(k=>k.clearRect(0,0,WORLD_W,WORLD_H));
     [ctxT, ctxU, ctxUd].forEach(k=>{ k.save(); k.translate(0, CANVAS_Y_OFFSET); });
 
     const px = DILATE_PX;
     const tolTarget = Math.max(3, px);
     const tolPiece  = Math.max(3, px);
 
-    drawDil(ctxT, tgt, tolTarget);
-    polys.forEach(pl=>drawDil(ctxU,  pl, 0));
-    polys.forEach(pl=>drawDil(ctxUd, pl, tolPiece));
+    drawDil(ctxT, tgt, tolTarget);     // 目標（ギャップ用）
+    polys.forEach(pl=>drawDil(ctxU,  pl, 0));        // ピース素
+    polys.forEach(pl=>drawDil(ctxUd, pl, tolPiece)); // ピース膨張
 
     [ctxT, ctxU, ctxUd].forEach(k=>k.restore());
 
     const targetArea = alphaCount(ctxT, WORLD_W, WORLD_H);
-    const AREA_TOL   = Math.max(5000, Math.round(targetArea * 0.0035));
+
+    // ★ 練習かどうかで閾値を切り替え
+    const isPractice = (state.mode==='practice' || state.pattern==='practice');
+    const dpr = (window.devicePixelRatio||1);
+
+    // 本番：従来のしきい値
+    let AREA_TOL_COEF = 0.0035;      // 0.35%
+    let EDGE_PAD_PX   = 12 * dpr;    // 12px * DPR
+    let OUT_TOL_RATE  = 0.004;       // 0.40%
+    let OUT_TOL_ABS_K = 1.00;        // 絶対量の倍率
+
+    // 練習：かなり緩め
+    if (isPractice){
+      AREA_TOL_COEF = 0.012;         // 1.2% までギャップ/重なり許容
+      EDGE_PAD_PX   = 18 * dpr;      // 端のはみ出しは広めに吸収
+      OUT_TOL_RATE  = 0.010;         // 1.0% まで“枠外”の比率許容
+      OUT_TOL_ABS_K = 2.50;          // 絶対量もしっかり増やす
+    }
+
+    const AREA_TOL   = Math.max(5000, Math.round(targetArea * AREA_TOL_COEF));
     const OUT_TOL    = Math.round(AREA_TOL * 0.5);
 
+    // 外側：ピース合成 − （ターゲット＋余白）
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.drawImage(cU,0,0);
     ctxX.globalCompositeOperation='destination-out';
-    ctxX.drawImage(cT,0,0);
+    ctxX.save();
+    ctxX.translate(0, CANVAS_Y_OFFSET);
+    drawDil(ctxX, tgt, Math.max(tolTarget, EDGE_PAD_PX));
+    ctxX.restore();
     ctxX.globalCompositeOperation='source-over';
     const outside = alphaCount(ctxX,WORLD_W,WORLD_H);
 
+    // ギャップ：ターゲット − 膨張ピース
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.drawImage(cT,0,0);
     ctxX.globalCompositeOperation='destination-out';
@@ -312,7 +333,8 @@ document.addEventListener('DOMContentLoaded', () => {
     ctxX.globalCompositeOperation='source-over';
     const gaps = alphaCount(ctxX,WORLD_W,WORLD_H);
 
-    const unionArea = alphaCount(ctxU,WORLD_W,WORLD_H);
+    // 重なり：各ピース合算 − 和集合
+    const unionArea = alphaCount(ctxU, WORLD_W, WORLD_H);
     let sum=0;
     for(const pl of polys){
       const plOff = pl.map(([x,y])=>[x, y + CANVAS_Y_OFFSET]);
@@ -322,9 +344,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     const overlap = Math.max(0, sum - unionArea);
 
-    if(outside>OUT_TOL) return {ok:false,reason:'枠外に出ています。'};
-    if(overlap>AREA_TOL) return {ok:false,reason:'ピースが重なっています。'};
-    if(gaps>AREA_TOL)    return {ok:false,reason:'隙間があります。'};
+    // 外側は「絶対量」かつ「比率」の両方で見て、両方を超えたらNG
+    const OUT_TOL_ABS = Math.max(20000, Math.round(AREA_TOL * 1.25 * OUT_TOL_ABS_K));
+    const outsideRate = outside / Math.max(1, targetArea);
+    if (outside > OUT_TOL_ABS && outsideRate > OUT_TOL_RATE) {
+      return {ok:false,reason:'枠外に出ています。'};
+    }
+    if (overlap > AREA_TOL) return {ok:false,reason:'ピースが重なっています。'};
+    if (gaps    > AREA_TOL) return {ok:false,reason:'隙間があります。'};
     return {ok:true};
   }
 
@@ -347,6 +374,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
     stop();
 
+    // 練習は送信しない・その場でリセット
     if (state.mode==='practice' || state.pattern==='practice'){
       alert(`CLEAR!\n課題: ${ACTIVE[state.puzzleIndex].title}\nタイム: ${state.elapsed}秒`);
       resetPieces(); resetTimer(); startTimer();
@@ -424,7 +452,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // 練習選択時は名前不要・必ず三角形
     if (practiceEntry?.checked){
       state.mode='practice';
-      state.pattern='practice'; // ★ 互換のため pattern も practice にしておく
+      state.pattern='practice';
       player.value = name || '';
 
       startScreen.classList.add('hidden');
