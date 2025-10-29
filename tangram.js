@@ -1,11 +1,11 @@
-// Tangram AB + PRACTICE（順序確定＋枠外判定ゆるめ版）
+// Tangram AB + PRACTICE（順序確定版）＋ 枠外判定さらにゆるめ
 document.addEventListener('DOMContentLoaded', () => {
   const WORLD_W = 1500, WORLD_H = 900, SNAP = 25;
   const CANVAS_Y_OFFSET = -60;
   const COUNT_STEP_MS = 700, FLASH_MS = 1000;
   const DILATE_PX = Math.max(4, Math.round(window.devicePixelRatio * 2));
 
-  // === Sheets（ABのみ使用／練習は送信しない）===
+  // === Sheets（ABのみ／練習は送らない）===
   const SHEETS_ENDPOINT = 'https://script.google.com/macros/s/AKfycbzC5tLGJlqn6U51wXDhrqppkRX-n2s4FkI6RDwFxvKe3yAM5xgFTfDjksYGE2Zl9KU/exec';
   const SHEETS_TOKEN    = 'REPLACE_WITH_YOUR_TOKEN';
 
@@ -119,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
     pieces:[], selectedId:null, puzzleIndex:0,
     step:'home', results:[], elapsed:0, timerId:null, frozen:false,
     pattern:'A', lastPrimeExposureMs:0,
-    allowFlash:false      // フラッシュ許可フラグ（trueの時のみ flashThen 実行）
+    allowFlash:false      // フラッシュ許可（true時のみ flashThen 実行）
   };
 
   // ===== Canvas & Utils =====
@@ -280,13 +280,13 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('keydown',e=>{ if(e.altKey&&(e.key==='s'||e.key==='S')) saveAnswer(); });
   }
 
-  // ===== ゆるめ判定の judge() =====
+  // ===== ゆるめ判定（外側さらに寛容）=====
   function judge(){
     const {ACTIVE}=currentSets();
-    const tgt=roundPts(ACTIVE[state.puzzleIndex].target);
-    const polys=state.pieces.map(p=> roundPts(transform(p.shape,p.offset,p.angle,p.flipped)) );
+    const tgt  = roundPts(ACTIVE[state.puzzleIndex].target);
+    const polys= state.pieces.map(p => roundPts(transform(p.shape,p.offset,p.angle,p.flipped)));
 
-    // バッファクリア
+    // クリア
     [ctxT, ctxU, ctxUd, ctxX].forEach(k=>k.clearRect(0,0,WORLD_W,WORLD_H));
     [ctxT, ctxU, ctxUd].forEach(k=>{ k.save(); k.translate(0, CANVAS_Y_OFFSET); });
 
@@ -294,21 +294,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const tolTarget = Math.max(3, px);
     const tolPiece  = Math.max(3, px);
 
-    // 目標形（ギャップ判定用）
-    drawDil(ctxT, tgt, tolTarget);
-    // ピース（素の合成）
-    polys.forEach(pl=>drawDil(ctxU,  pl, 0));
-    // ピース（膨張：重なり/ギャップ判定）
-    polys.forEach(pl=>drawDil(ctxUd, pl, tolPiece));
+    // マスク
+    drawDil(ctxT, tgt, tolTarget);       // 目標（ギャップ用）
+    polys.forEach(pl=>drawDil(ctxU,  pl, 0));        // ピース素
+    polys.forEach(pl=>drawDil(ctxUd, pl, tolPiece)); // ピース膨張
 
     [ctxT, ctxU, ctxUd].forEach(k=>k.restore());
 
-    const targetArea = alphaCount(ctxT, WORLD_W, WORLD_H);
-    const AREA_TOL   = Math.max(8000, Math.round(targetArea * 0.006)); // 0.6% 寛容
-    const OUT_TOL    = Math.round(AREA_TOL * 0.9);                      // 外側許容量も拡大
+    // 面積＆しきい値（かなり寛容）
+    const targetArea   = alphaCount(ctxT, WORLD_W, WORLD_H);
+    const EDGE_PAD     = Math.max(12, Math.round(12 * (window.devicePixelRatio||1))); // ← 太め
+    const AREA_TOL     = Math.max(12000, Math.round(targetArea * 0.009));             // ← 0.9%
+    const OUT_TOL_ABS  = Math.max(20000, Math.round(AREA_TOL * 1.25));                // ← 外側はさらに許容
+    const OUT_TOL_RATE = 0.004;                                                       // ← 0.4% までは比率で無視
 
-    // 外側（余白付きで緩く）
-    const EDGE_PAD = 10;
+    // 外側（余白をさらに広めに）
     ctxX.clearRect(0,0,WORLD_W,WORLD_H);
     ctxX.drawImage(cU,0,0);
     ctxX.globalCompositeOperation='destination-out';
@@ -328,20 +328,24 @@ document.addEventListener('DOMContentLoaded', () => {
     const gaps = alphaCount(ctxX,WORLD_W,WORLD_H);
 
     // 重なり（各ピース合算 − 和集合）
-    const unionArea = alphaCount(ctxU,WORLD_W,WORLD_H);
+    const unionArea = alphaCount(ctxU, WORLD_W, WORLD_H);
     let sum=0;
     for(const pl of polys){
       const plOff = pl.map(([x,y])=>[x, y + CANVAS_Y_OFFSET]);
       ctxX.clearRect(0,0,WORLD_W,WORLD_H);
       drawDil(ctxX, plOff, 0);
-      sum += alphaCount(ctxX,WORLD_W,WORLD_H);
+      sum += alphaCount(ctxX, WORLD_W, WORLD_H);
     }
     const overlap = Math.max(0, sum - unionArea);
 
-    if(outside>OUT_TOL) return {ok:false,reason:'枠外に出ています。'};
-    if(overlap>AREA_TOL) return {ok:false,reason:'ピースが重なっています。'};
-    if(gaps>AREA_TOL)    return {ok:false,reason:'隙間があります。'};
-    return {ok:true};
+    // 判定（外側は絶対量＆比率の両条件を超えたらNG）
+    const outsideRate = outside / Math.max(1, targetArea);
+    if (outside > OUT_TOL_ABS && outsideRate > OUT_TOL_RATE) {
+      return { ok:false, reason:'枠外に出ています。' };
+    }
+    if (overlap > AREA_TOL) return { ok:false, reason:'ピースが重なっています。' };
+    if (gaps    > AREA_TOL) return { ok:false, reason:'隙間があります。' };
+    return { ok:true };
   }
 
   // ========== 進行 ==========
