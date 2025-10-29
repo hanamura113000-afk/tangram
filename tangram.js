@@ -90,8 +90,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const startScreen=$('startScreen'), playerEntry=$('playerEntry'),
         patternAEntry=$('patternAEntry'), patternBEntry=$('patternBEntry'),
         practiceEntry=$('practiceEntry');
-  const practiceIntro=$('practiceIntro'); // 新規
-  const practicePrimeScreen=$('practicePrimeScreen'); // 新規
+  const practiceIntro=$('practiceIntro');
+  const practicePrimeScreen=$('practicePrimeScreen');
   const primeScreen=$('primeScreen');
   const countScreen=$('countScreen'), countdownEl=$('countdown');
   const ui=$('ui'), stageWrap=$('stageWrap'), mobileCtrls=$('mobileControls');
@@ -137,15 +137,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const alphaCount=(k,w,h)=>{const d=k.getImageData(0,0,w,h).data;let c=0;for(let i=3;i<d.length;i+=4){if(d[i]!==0)c++;}return c;}
 
   function drawDil(k, pts, px){
-    drawPath(k, pts); k.fillStyle='#000';
-    k.fill();
+    drawPath(k, pts); k.fillStyle='#000'; k.fill();
     if (px > 0){ k.lineWidth = px*2+1; k.lineJoin='round'; k.lineCap='round'; k.miterLimit=2; k.strokeStyle='#000'; k.stroke(); }
   }
 
-  // セット取得（練習は三角形固定）
+  // セット取得（練習は三角形固定、フェーズ2のみフラッシュ）
   function currentSets(){
     if (state.mode==='practice'){
-      return { ACTIVE: [PRACTICE_PUZZLE], FLASH: [state.practicePhase===2] }; // フェーズ2のみ答え表示あり
+      return { ACTIVE: [PRACTICE_PUZZLE], FLASH: [state.practicePhase===2] };
     }
     if(state.pattern==='B'){
       return { ACTIVE: PUZZLES_B.concat(PUZZLES_A),
@@ -338,20 +337,20 @@ document.addEventListener('DOMContentLoaded', () => {
     flashThen(()=>startTimer());
   }
 
-  // 判定→記録/送信→遷移（練習は特別フロー）
+  // 判定→記録/送信→遷移（★練習1はフラッシュせず説明へ）
   async function onJudge(){
     const {ACTIVE, FLASH}=currentSets();
 
-    // 練習：ステージ1は「判定ボタン押下で答えを表示（フラッシュ）してから、ステージ2へ案内」
+    // === 練習：ステージ1（答えなし）→ ここではフラッシュしない
     if (state.mode==='practice' && state.practicePhase===1){
-      await flashThen(()=>{}); // 1秒だけ正解を表示
-      // ステージ2案内画面へ
-      await showOverlay(practicePrimeScreen);
+      const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
+      stop(); // 計測停止
+      await showOverlay(practicePrimeScreen); // ステージ2の説明へ
       state.step='practicePrimeWait';
       return;
     }
 
-    // 練習：ステージ2は通常の判定（送信なし）
+    // === 練習：ステージ2（答え表示あり）
     if (state.mode==='practice' && state.practicePhase===2){
       const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
       stop();
@@ -360,7 +359,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // 本番 A/B
+    // === 本番 A/B
     const r=judge(); if(!r.ok){ alert('不正解：'+r.reason); return; }
     stop();
 
@@ -463,7 +462,7 @@ document.addEventListener('DOMContentLoaded', () => {
     firstHalf();
   };
 
-  // 練習：説明 → ステージ1開始
+  // 練習：説明 → ステージ1開始（答えなし）
   window.__practiceIntroGo = function(){
     practiceIntro.classList.add('hidden');
     // UI 表示
