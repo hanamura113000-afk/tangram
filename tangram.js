@@ -3,7 +3,7 @@
 document.addEventListener('DOMContentLoaded', () => {
   const WORLD_W=1500, WORLD_H=900, SNAP=25;
   const CANVAS_Y_OFFSET = -60;
-  const COUNT_STEP_MS=700, FLASH_MS=100;
+  const COUNT_STEP_MS=700, FLASH_MS=50;
   const DILATE_PX = Math.max(4, Math.round(window.devicePixelRatio * 2));
 
   // --- Sheets（練習は送信しない） ---
