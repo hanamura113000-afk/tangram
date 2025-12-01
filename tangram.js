@@ -709,7 +709,7 @@ const DEFAULT_LAYOUTS = {
       }
     }
   },
-  "練習（三角形)": {
+  "練習（三角形）": {
     "v": 1,
     "byId": {
       "0": {
@@ -1122,15 +1122,6 @@ window.__practiceReset=__practiceReset; window.__practiceBack=__practiceBack;
 (function init(){ timerEl.textContent='00:00'; const {ACTIVE}=currentSets(); titleEl.textContent=ACTIVE[0]?.title||'—'; })();
 // =========== 実装ここまで ===========
 </script>
-<script>
-// あなたのJSONを埋め込む（テンプレ内のプレースホルダを置換）
-// このスクリプト実行時に置換します（上の %DEFAULT_JSON_PLACEHOLDER% を実体に）
-(function(){
-  var raw = document.currentScript.previousElementSibling.textContent;
-  var yourJSON = `REPLACE_WITH_YOUR_JSON`;
-  var patched = raw.replace('%DEFAULT_JSON_PLACEHOLDER%', yourJSON);
-  document.currentScript.previousElementSibling.textContent = patched;
-})();
-</script>
+
 </body>
 </html>
