@@ -1,4 +1,4 @@
-// Tangram AB + PRACTICE フロー実装版
+// Tangram AB + PRACTICE フロー実装版（正解データ埋め込み済み）
 // 練習: 説明① → ステージ1(通常) → 説明② → 3-2-1 → 1秒フラッシュ → ステージ2 → クリアでスタートへ
 document.addEventListener('DOMContentLoaded', () => {
   const WORLD_W=1500, WORLD_H=900, SNAP=25;
@@ -105,13 +105,159 @@ document.addEventListener('DOMContentLoaded', () => {
   const ADMIN=location.search.includes('admin=1');
   if(ADMIN){ saveBtn.classList.remove('hidden'); adminBadge.classList.remove('hidden'); }
 
-  // --- localStorage ---
+  // --- Layout Data (Hardcoded) ---
+  // これにより、どの端末でも正解レイアウトが参照可能になります
+  const FIXED_LAYOUTS = {
+  "アヒル": {
+    "v": 1,
+    "byId": {
+      "0": { "offset": [ 508.5786437626905, 379.28932188134524 ], "angle": 45, "flipped": false },
+      "1": { "offset": [ 679.4873734152916, 208.64466094067262 ], "angle": 315, "flipped": false },
+      "2": { "offset": [ 502.71067811865476, 294 ], "angle": 45, "flipped": false },
+      "3": { "offset": [ 760.5533905932737, 192.2233047033631 ], "angle": 135, "flipped": false },
+      "4": { "offset": [ 710.5533905932738, 354.3553390593274 ], "angle": 45, "flipped": false },
+      "5": { "offset": [ 777.966991411009, 190.96699141100896 ], "angle": 45, "flipped": false },
+      "6": { "offset": [ 793.5, 197.4669914110089 ], "angle": 315, "flipped": false }
+    }
+  },
+  "凹み": {
+    "v": 1,
+    "byId": {
+      "0": { "offset": [ 402.71067811865476, 379.28932188134524 ], "angle": 45, "flipped": false },
+      "1": { "offset": [ 785.2893218813452, 279.28932188134524 ], "angle": 45, "flipped": false },
+      "2": { "offset": [ 643.9339828220178, 329.3553390593274 ], "angle": 315, "flipped": false },
+      "3": { "offset": [ 477.71067811865476, 192.35533905932738 ], "angle": 225, "flipped": false },
+      "4": { "offset": [ 710.2893218813452, 248.2233047033631 ], "angle": 45, "flipped": false },
+      "5": { "offset": [ 777.966991411009, 85.03300858899107 ], "angle": 135, "flipped": false },
+      "6": { "offset": [ 422.53300858899104, 250.56601717798213 ], "angle": 45, "flipped": false }
+    }
+  },
+  "家": {
+    "v": 1,
+    "byId": {
+      "0": { "offset": [ 508.71067811865476, 379.4213562373095 ], "angle": 45, "flipped": false },
+      "1": { "offset": [ 679.2893218813452, 208.71067811865476 ], "angle": 315, "flipped": false },
+      "2": { "offset": [ 643.9339828220179, 46.57864376269046 ], "angle": 135, "flipped": false },
+      "3": { "offset": [ 477.71067811865476, 227.64466094067262 ], "angle": 315, "flipped": false },
+      "4": { "offset": [ 604.2893218813451, 177.64466094067262 ], "angle": 315, "flipped": false },
+      "5": { "offset": [ 565.9009742330268, 84.96699141100893 ], "angle": 45, "flipped": false },
+      "6": { "offset": [ 687.5, 197.4669914110089 ], "angle": 225, "flipped": true }
+    }
+  },
+  "コマ": {
+    "v": 1,
+    "byId": {
+      "0": { "offset": [ 614.5786437626905, 414.71067811865476 ], "angle": 135, "flipped": false },
+      "1": { "offset": [ 573.157287525381, 314.7106781186548 ], "angle": 315, "flipped": false },
+      "2": { "offset": [ 538.0660171779821, 258.6446609406726 ], "angle": 135, "flipped": false },
+      "3": { "offset": [ 583.5126265847083, 298.2893218813453 ], "angle": 225, "flipped": false },
+      "4": { "offset": [ 604.223304703363, 283.6446609406727 ], "angle": 315, "flipped": false },
+      "5": { "offset": [ 618.966991411009, 84.96699141100893 ], "angle": 45, "flipped": false },
+      "6": { "offset": [ 687.5, 303.53300858899104 ], "angle": 45, "flipped": true }
+    }
+  },
+  "サカナ": {
+    "v": 1,
+    "byId": {
+      "0": { "offset": [ 494.00000000000006, 306 ], "angle": 90, "flipped": false },
+      "1": { "offset": [ 694, 206 ], "angle": 0, "flipped": false },
+      "2": { "offset": [ 388.06601717798213, 291.3553390593274 ], "angle": 315, "flipped": false },
+      "3": { "offset": [ 583.6446609406727, 551.7106781186548 ], "angle": 315, "flipped": false },
+      "4": { "offset": [ 344, 406 ], "angle": 90, "flipped": false },
+      "5": { "offset": [ 469, 281 ], "angle": 0, "flipped": false },
+      "6": { "offset": [ 469, 205.99999999999997 ], "angle": 0, "flipped": true }
+    }
+  },
+  "狐": {
+    "v": 1,
+    "byId": {
+      "0": { "offset": [ 402.5786437626905, 414.71067811865476 ], "angle": 135, "flipped": false },
+      "1": { "offset": [ 714.5786437626905, 314.71067811865476 ], "angle": 225, "flipped": false },
+      "2": { "offset": [ 594, 394 ], "angle": 270, "flipped": false },
+      "3": { "offset": [ 760.3553390593274, 333.71067811865476 ], "angle": 45, "flipped": false },
+      "4": { "offset": [ 831, 319 ], "angle": 0, "flipped": false },
+      "5": { "offset": [ 831, 319.00000000000006 ], "angle": 0, "flipped": false },
+      "6": { "offset": [ 263.3019484660536, 303.46699141100896 ], "angle": 45, "flipped": true }
+    }
+  },
+  "猫": {
+    "v": 1,
+    "byId": {
+      "0": { "offset": [ 606, 293.99999999999994 ], "angle": 180, "flipped": false },
+      "1": { "offset": [ 556, 144 ], "angle": 90, "flipped": false },
+      "2": { "offset": [ 456, 244 ], "angle": 0, "flipped": false },
+      "3": { "offset": [ 881, 218.99999999999997 ], "angle": 90, "flipped": false },
+      "4": { "offset": [ 731, 169 ], "angle": 180, "flipped": false },
+      "5": { "offset": [ 831, 169 ], "angle": 0, "flipped": false },
+      "6": { "offset": [ 237.5, 303.4669914110089 ], "angle": 45, "flipped": true }
+    }
+  },
+  "ライオン": {
+    "v": 1,
+    "byId": {
+      "0": { "offset": [ 614.5786437626905, 414.71067811865476 ], "angle": 135, "flipped": false },
+      "1": { "offset": [ 856.0000000000001, 344.00000000000006 ], "angle": 270, "flipped": false },
+      "2": { "offset": [ 538.0660171779821, 152.64466094067265 ], "angle": 135, "flipped": false },
+      "3": { "offset": [ 901.7106781186549, 333.6446609406727 ], "angle": 315, "flipped": false },
+      "4": { "offset": [ 533.7106781186548, 354.3553390593274 ], "angle": 135, "flipped": false },
+      "5": { "offset": [ 565.8349570550447, 190.9669914110089 ], "angle": 135, "flipped": false },
+      "6": { "offset": [ 906.0000000000001, 394.00000000000006 ], "angle": 0, "flipped": false }
+    }
+  },
+  "ネッシー": {
+    "v": 1,
+    "byId": {
+      "0": { "offset": [ 389.5786437626905, 339.71067811865476 ], "angle": 135, "flipped": false },
+      "1": { "offset": [ 706, 193.99999999999994 ], "angle": 270, "flipped": false },
+      "2": { "offset": [ 806, 344 ], "angle": 180, "flipped": false },
+      "3": { "offset": [ 806, 294 ], "angle": 90, "flipped": false },
+      "4": { "offset": [ 806, 244 ], "angle": 180, "flipped": false },
+      "5": { "offset": [ 884.033008588991, 297.03300858899104 ], "angle": 45, "flipped": false },
+      "6": { "offset": [ 250.3019484660536, 334.53300858899104 ], "angle": 135, "flipped": false }
+    }
+  },
+  "魚": { // 元データでは「魚B」でしたが、コードのtitle「魚」に合わせました
+    "v": 1,
+    "byId": {
+      "0": { "offset": [ 616.7106781186548, 414.57864376269043 ], "angle": 135, "flipped": false },
+      "1": { "offset": [ 575.2893218813452, 208.5126265847084 ], "angle": 315, "flipped": false },
+      "2": { "offset": [ 538, 364.71067811865476 ], "angle": 135, "flipped": false },
+      "3": { "offset": [ 585.6446609406727, 545.6446609406727 ], "angle": 315, "flipped": false },
+      "4": { "offset": [ 712.4213562373095, 283.5126265847083 ], "angle": 315, "flipped": false },
+      "5": { "offset": [ 672.033008588991, 191.03300858899104 ], "angle": 45, "flipped": false },
+      "6": { "offset": [ 581.5, 197.46699141100893 ], "angle": 45, "flipped": true }
+    }
+  },
+  "練習（三角形）": {
+    "v": 1,
+    "byId": {
+      "0": { "offset": [ 606, 188 ], "angle": 180, "flipped": false },
+      "1": { "offset": [ 280, 620 ], "angle": 0, "flipped": false },
+      "2": { "offset": [ 480, 620 ], "angle": 0, "flipped": false },
+      "3": { "offset": [ 680, 620 ], "angle": 0, "flipped": false },
+      "4": { "offset": [ 880, 620 ], "angle": 0, "flipped": false },
+      "5": { "offset": [ 1080, 620 ], "angle": 0, "flipped": false },
+      "6": { "offset": [ 1280, 620 ], "angle": 0, "flipped": false }
+    }
+  }
+};
+
+  // --- 修正版レイアウト取得関数 ---
+  // localStorageは使わず、上記のFIXED_LAYOUTSから取得します
+  const getLayout = (t) => {
+    return FIXED_LAYOUTS[t] || null;
+  };
+  
+  // 管理者保存用（必要な場合のみlocalStorageに書くが、読み込みはFIXED優先）
   const LKEY='tangramLayouts_v1';
-  let memStore={};
-  const loadLs=()=>{ try{ return JSON.parse(localStorage.getItem(LKEY)||'{}'); }catch(_){ return {...memStore}; } };
-  const saveLs=o=>{ try{ localStorage.setItem(LKEY, JSON.stringify(o)); }catch(_){ memStore={...o}; } };
-  const getLayout=t=> (loadLs()[t]||null);
-  const setLayout=(t,byId)=>{ const all=loadLs(); all[t]={v:1,byId}; saveLs(all); };
+  const loadLs=()=>{ try{ return JSON.parse(localStorage.getItem(LKEY)||'{}'); }catch(_){ return {}; } };
+  const saveLs=o=>{ try{ localStorage.setItem(LKEY, JSON.stringify(o)); }catch(_){} };
+  const setLayout=(t,byId)=>{ 
+    const all=loadLs(); all[t]={v:1,byId}; saveLs(all); 
+    // 開発時に確認するためコンソールに出す
+    console.log("Local Saved. Copy this for FIXED_LAYOUTS:", JSON.stringify(all));
+  };
+
 
   // --- 状態 ---
   const state={
@@ -251,6 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function flashThen(cb){
     await countdown3();
     const {ACTIVE}=currentSets();
+    // ここでFIXED_LAYOUTSから取得
     const rec=getLayout(ACTIVE[state.puzzleIndex].title);
     state.lastPrimeExposureMs = 0;
     if(!rec || !rec.byId){ cb?.(); return; } // 保存が無ければスキップ
@@ -277,7 +424,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const t=ACTIVE[state.puzzleIndex].title; const byId={};
     state.pieces.forEach(p=>{ byId[String(p.id)]={ offset:[...p.offset], angle:p.angle, flipped:!!p.flipped }; });
     setLayout(t,byId);
-    alert(`「${t}」の正解レイアウトを保存しました！（この端末のブラウザに保存）`);
+    alert(`「${t}」の正解レイアウトを保存しました！（この端末のブラウザに保存）\n後でコンソールからJSONを取得してください。`);
   }
   if(ADMIN){
     saveBtn.addEventListener('click',saveAnswer);
