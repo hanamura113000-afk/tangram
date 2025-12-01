@@ -47,7 +47,7 @@
           <label class="row"><input id="patternBEntry" type="radio" name="pattern"> <span>パターンB（1-5 prime / 6-10 control）</span></label>
         </div>
         <label class="row" style="margin-top:8px"><input id="practiceEntry" type="checkbox"> <span>練習モードで開始（説明→通常→説明→フラッシュ→通常）</span></label>
-        <button class="primary" style="margin-top:12px" onclick="__startGo()">スタート</button>
+        <button id="startBtn" class="primary" style="margin-top:12px" type="button">スタート</button>
         <div class="hint" style="margin-top:8px">URLに <code>?admin=1</code> を付けると管理ボタンが出ます（この端末のlocalStorageへ保存可）。</div>
       </section>
 
@@ -847,6 +847,7 @@ async function postToSheets(payload){
 // DOM
 const $=id=>document.getElementById(id);
 const startScreen=$('startScreen');
+const startBtn=$('startBtn');
 const playerEntry=$('playerEntry');
 const patternAEntry=$('patternAEntry');
 const patternBEntry=$('patternBEntry');
@@ -1070,6 +1071,10 @@ function __startGo(){
   hide(startScreen); firstHalf();
 }
 window.__startGo=__startGo;
+// クリックを安全にバインド（inline依存をやめる）
+startBtn && startBtn.addEventListener('click', ()=>{
+  try{ __startGo(); }catch(e){ console.error('start error', e); alert('開始時にエラーが発生しました。コンソールをご確認ください。'); }
+});
 
 function __primeGo(){ hide(primeScreen); secondHalf(); }
 window.__primeGo=__primeGo;
